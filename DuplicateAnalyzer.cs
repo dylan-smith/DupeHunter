@@ -1,0 +1,146 @@
+using Microsoft.Data.SqlClient;
+
+namespace HarddriveDeduper;
+
+/// <summary>A set of identical files — same content hash and size — found at two or more locations.</summary>
+public sealed class DuplicateGroup
+{
+    public required string ContentHash { get; init; }
+    public required long SizeBytes { get; init; }
+
+    /// <summary>One file name from the group (meaningful only when <see cref="DistinctNameCount"/> is 1).</summary>
+    public required string FileName { get; init; }
+
+    /// <summary>How many distinct file names the copies use; &gt; 1 means the name varies across locations.</summary>
+    public required int DistinctNameCount { get; init; }
+
+    /// <summary>Number of distinct locations this content lives at.</summary>
+    public required int CopyCount { get; init; }
+
+    /// <summary>Reclaimable space: the redundant copies (count − 1) × file size.</summary>
+    public required long WastedBytes { get; init; }
+
+    /// <summary>A handful of the locations, for display. May be fewer than <see cref="CopyCount"/>.</summary>
+    public List<string> SamplePaths { get; } = new();
+}
+
+/// <summary>
+/// The outcome of a duplicate analysis: the duplicate sets plus which scan run they came from.
+/// <see cref="ScanRunId"/> is null when the table holds no data yet.
+/// </summary>
+public sealed record DuplicateAnalysis(
+    string? ScanRunId,
+    DateTime? ScannedAtUtc,
+    IReadOnlyList<DuplicateGroup> Groups);
+
+/// <summary>
+/// Queries the scanned file table for content that exists in multiple locations and ranks the worst
+/// offenders by wasted space. Only the most recent scan run is considered, so files that were present
+/// in an earlier scan but have since been deleted from disk are excluded. Files are considered
+/// identical when their content hash and size both match; rows without a hash are ignored.
+/// </summary>
+public sealed class DuplicateAnalyzer
+{
+    private readonly Options _options;
+
+    public DuplicateAnalyzer(Options options) => _options = options;
+
+    /// <summary>
+    /// Find the <paramref name="topN"/> duplicate sets with the most wasted space within the latest
+    /// scan run, attaching up to <paramref name="samplePathsPerGroup"/> example locations to each.
+    /// </summary>
+    public async Task<DuplicateAnalysis> FindTopDuplicatesAsync(
+        int topN, int samplePathsPerGroup, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(_options.ConnectionString);
+        await conn.OpenAsync(ct);
+
+        (string? runId, DateTime? scannedAt) = await GetLatestScanRunAsync(conn, ct);
+        if (runId is null)
+            return new DuplicateAnalysis(null, null, Array.Empty<DuplicateGroup>());
+
+        List<DuplicateGroup> groups = await QueryTopGroupsAsync(conn, runId, topN, ct);
+
+        foreach (DuplicateGroup g in groups)
+            await LoadSamplePathsAsync(conn, runId, g, samplePathsPerGroup, ct);
+
+        return new DuplicateAnalysis(runId, scannedAt, groups);
+    }
+
+    /// <summary>The scan run that wrote the most recent row, identified by its latest <c>ScannedAtUtc</c>.</summary>
+    private async Task<(string? RunId, DateTime? ScannedAt)> GetLatestScanRunAsync(SqlConnection conn, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $@"
+SELECT TOP (1) ScanRunId, ScannedAtUtc
+FROM {_options.TableName}
+ORDER BY ScannedAtUtc DESC, Id DESC;";
+        cmd.CommandTimeout = 0;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return (null, null);
+
+        return (reader.GetString(0).TrimEnd(), reader.GetDateTime(1));
+    }
+
+    private async Task<List<DuplicateGroup>> QueryTopGroupsAsync(
+        SqlConnection conn, string runId, int topN, CancellationToken ct)
+    {
+        string sql = $@"
+SELECT TOP (@topN)
+    ContentHash,
+    SizeBytes,
+    COUNT(*)                                  AS CopyCount,
+    CAST(COUNT(*) - 1 AS BIGINT) * SizeBytes  AS WastedBytes,
+    MIN(FileName)                             AS SampleName,
+    COUNT(DISTINCT FileName)                  AS DistinctNameCount
+FROM {_options.TableName}
+WHERE ScanRunId = @runId AND ContentHash IS NOT NULL
+GROUP BY ContentHash, SizeBytes
+HAVING COUNT(*) > 1
+ORDER BY WastedBytes DESC;";
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue("@topN", topN);
+        cmd.Parameters.AddWithValue("@runId", runId);
+
+        var groups = new List<DuplicateGroup>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            groups.Add(new DuplicateGroup
+            {
+                ContentHash = reader.GetString(0).TrimEnd(),
+                SizeBytes = reader.GetInt64(1),
+                CopyCount = reader.GetInt32(2),
+                WastedBytes = reader.GetInt64(3),
+                FileName = reader.GetString(4),
+                DistinctNameCount = reader.GetInt32(5),
+            });
+        }
+        return groups;
+    }
+
+    private async Task LoadSamplePathsAsync(
+        SqlConnection conn, string runId, DuplicateGroup g, int limit, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $@"
+SELECT TOP (@limit) FullPath
+FROM {_options.TableName}
+WHERE ScanRunId = @runId AND ContentHash = @hash AND SizeBytes = @size
+ORDER BY FullPath;";
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue("@limit", limit);
+        cmd.Parameters.AddWithValue("@runId", runId);
+        cmd.Parameters.AddWithValue("@hash", g.ContentHash);
+        cmd.Parameters.AddWithValue("@size", g.SizeBytes);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            g.SamplePaths.Add(reader.GetString(0));
+    }
+}

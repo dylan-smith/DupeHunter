@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 
 namespace HarddriveDeduper;
@@ -16,6 +17,9 @@ public sealed class FileScanner(Options options)
     public long FilesSeen;
     public long DirectoriesSkipped;
     public long HashErrors;
+
+    /// <summary>Directories that couldn't be enumerated, with the reason. Populated as the scan runs.</summary>
+    public readonly ConcurrentQueue<SkipRecord> Skips = new();
 
     /// <summary>Lazily enumerate file metadata under <paramref name="root"/>. Hashing happens later.</summary>
     public IEnumerable<FileRecord> EnumerateFiles(string root)
@@ -37,7 +41,7 @@ public sealed class FileScanner(Options options)
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
             {
-                Interlocked.Increment(ref DirectoriesSkipped);
+                RecordSkip(dir, ex);
                 continue;
             }
 
@@ -56,7 +60,7 @@ public sealed class FileScanner(Options options)
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
             {
-                Interlocked.Increment(ref DirectoriesSkipped);
+                RecordSkip(dir, ex);
                 continue;
             }
 
@@ -70,6 +74,13 @@ public sealed class FileScanner(Options options)
                 }
             }
         }
+    }
+
+    /// <summary>Count an inaccessible directory and remember its path + reason for later persistence.</summary>
+    private void RecordSkip(string dir, Exception ex)
+    {
+        Interlocked.Increment(ref DirectoriesSkipped);
+        Skips.Enqueue(new SkipRecord { FullPath = dir, Reason = ex.GetType().Name + ": " + ex.Message });
     }
 
     private static FileRecord? TryReadMetadata(string path)

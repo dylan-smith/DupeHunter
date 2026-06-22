@@ -11,6 +11,9 @@ public sealed partial class Options
 
     public string TableName { get; set; } = "dbo.Files";
 
+    /// <summary>Table recording directories that couldn't be enumerated during a scan.</summary>
+    public string SkipTableName { get; set; } = "dbo.ScanSkips";
+
     /// <summary>When true, file contents are hashed (SHA-256). Disable for a fast metadata-only inventory.</summary>
     public bool ComputeHash { get; set; } = true;
 
@@ -28,6 +31,15 @@ public sealed partial class Options
 
     /// <summary>Follow directory reparse points (symlinks / junctions). Off by default to avoid loops.</summary>
     public bool FollowReparsePoints { get; set; }
+
+    /// <summary>Run duplicate analysis against an already-scanned table instead of scanning drives.</summary>
+    public bool Analyze { get; set; }
+
+    /// <summary>Skip the duplicate analysis that otherwise runs automatically after a scan.</summary>
+    public bool NoAnalyze { get; set; }
+
+    /// <summary>How many duplicate sets to list in analysis mode (ranked by wasted space).</summary>
+    public int TopN { get; set; } = 10;
 
     public bool ShowHelp { get; set; }
 
@@ -70,6 +82,10 @@ public sealed partial class Options
                     o.TableName = Next(arg);
                     break;
 
+                case "--skip-table":
+                    o.SkipTableName = Next(arg);
+                    break;
+
                 case "--no-hash":
                     o.ComputeHash = false;
                     break;
@@ -92,6 +108,19 @@ public sealed partial class Options
 
                 case "--follow-links":
                     o.FollowReparsePoints = true;
+                    break;
+
+                case "--analyze":
+                case "--duplicates":
+                    o.Analyze = true;
+                    break;
+
+                case "--no-analyze":
+                    o.NoAnalyze = true;
+                    break;
+
+                case "--top":
+                    o.TopN = Math.Max(1, int.Parse(Next(arg)));
                     break;
 
                 default:

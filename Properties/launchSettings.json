@@ -1,8 +1,8 @@
 {
   "profiles": {
-    "fileindexer (E: drive)": {
+    "fileindexer (D: drive)": {
       "commandName": "Project",
-      "commandLineArgs": "--drives E"
+      "commandLineArgs": "--drives C --recreate"
     }
   }
 }

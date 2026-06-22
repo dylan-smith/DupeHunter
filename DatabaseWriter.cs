@@ -41,9 +41,51 @@ END";
         await _connection.OpenAsync(ct);
 
         if (_options.Recreate)
+        {
             await ExecuteAsync(DropTableSql(), ct);
+            await ExecuteAsync(DropSkipsTableSql(), ct);
+        }
 
         await ExecuteAsync(CreateTableSql(), ct);
+        await ExecuteAsync(CreateSkipsTableSql(), ct);
+    }
+
+    /// <summary>
+    /// Persist the directories skipped during the scan, tagged with this run's <c>ScanRunId</c> so they
+    /// can be correlated with the file rows. One-shot bulk insert; safe to call with an empty set.
+    /// </summary>
+    public async Task WriteSkipsAsync(IReadOnlyCollection<SkipRecord> skips, CancellationToken ct)
+    {
+        if (skips.Count == 0)
+            return;
+
+        var table = new DataTable();
+        table.Columns.Add("FullPath", typeof(string));
+        table.Columns.Add("Reason", typeof(string));
+        table.Columns.Add("ScanRunId", typeof(string));
+        table.Columns.Add("ScannedAtUtc", typeof(DateTime));
+
+        DateTime now = DateTime.UtcNow;
+        foreach (SkipRecord s in skips)
+        {
+            DataRow row = table.NewRow();
+            row["FullPath"] = s.FullPath;
+            row["Reason"] = s.Reason;
+            row["ScanRunId"] = _scanRunId;
+            row["ScannedAtUtc"] = now;
+            table.Rows.Add(row);
+        }
+
+        using var bulk = new SqlBulkCopy(_connection)
+        {
+            DestinationTableName = _options.SkipTableName,
+            BulkCopyTimeout = 0,
+            BatchSize = _options.BatchSize,
+        };
+        foreach (DataColumn col in table.Columns)
+            bulk.ColumnMappings.Add(col.ColumnName, col.ColumnName);
+
+        await bulk.WriteToServerAsync(table, ct);
     }
 
     /// <summary>Add a record to the buffer; flushes automatically once the batch size is reached.</summary>
@@ -121,6 +163,22 @@ BEGIN
     );
     CREATE INDEX IX_Files_ContentHash ON {_options.TableName} (ContentHash) WHERE ContentHash IS NOT NULL;
     CREATE INDEX IX_Files_SizeBytes   ON {_options.TableName} (SizeBytes);
+END";
+
+    private string DropSkipsTableSql() =>
+        $"IF OBJECT_ID('{_options.SkipTableName}', 'U') IS NOT NULL DROP TABLE {_options.SkipTableName};";
+
+    private string CreateSkipsTableSql() => $@"
+IF OBJECT_ID('{_options.SkipTableName}', 'U') IS NULL
+BEGIN
+    CREATE TABLE {_options.SkipTableName} (
+        Id           BIGINT IDENTITY(1,1) PRIMARY KEY,
+        FullPath     NVARCHAR(MAX)  NOT NULL,
+        Reason       NVARCHAR(MAX)  NOT NULL,
+        ScanRunId    CHAR(32)       NOT NULL,
+        ScannedAtUtc DATETIME2(3)   NOT NULL
+    );
+    CREATE INDEX IX_ScanSkips_ScanRunId ON {_options.SkipTableName} (ScanRunId);
 END";
 
     /// <summary>Create the target database if the connection points at one that doesn't exist yet.</summary>

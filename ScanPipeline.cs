@@ -62,6 +62,7 @@ public sealed class ScanPipeline
             channel.Writer.Complete();
             await consumer;
             await _writer.FlushAsync(CancellationToken.None);
+            await _writer.WriteSkipsAsync(_scanner.Skips.ToArray(), CancellationToken.None);
             return 0;
         }
         catch (OperationCanceledException)
@@ -70,6 +71,7 @@ public sealed class ScanPipeline
             channel.Writer.TryComplete();
             try { await consumer; } catch { /* ignore */ }
             try { await _writer.FlushAsync(CancellationToken.None); } catch { /* ignore */ }
+            try { await _writer.WriteSkipsAsync(_scanner.Skips.ToArray(), CancellationToken.None); } catch { /* ignore */ }
             return 130;
         }
         catch (Exception ex)

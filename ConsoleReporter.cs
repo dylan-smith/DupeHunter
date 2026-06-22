@@ -38,13 +38,71 @@ public sealed class ConsoleReporter
         Console.WriteLine("Done.");
         Console.WriteLine($"  Files seen:       {scanner.FilesSeen:N0}");
         Console.WriteLine($"  Rows written:     {writer.RowsWritten:N0}");
-        Console.WriteLine($"  Directories skipped (access): {scanner.DirectoriesSkipped:N0}");
+        string skipNote = scanner.DirectoriesSkipped > 0 ? $"  (logged to {_options.SkipTableName})" : "";
+        Console.WriteLine($"  Directories skipped (access): {scanner.DirectoriesSkipped:N0}{skipNote}");
         Console.WriteLine($"  Hash errors:      {scanner.HashErrors:N0}");
         Console.WriteLine($"  Elapsed:          {elapsed:hh\\:mm\\:ss}");
     }
 
+    /// <summary>Print the ranked duplicate sets produced by <see cref="DuplicateAnalyzer"/>.</summary>
+    public void PrintDuplicates(DuplicateAnalysis analysis, int topN)
+    {
+        if (analysis.ScanRunId is null)
+        {
+            Console.WriteLine($"No scan data found in {_options.TableName}. Run a scan first.");
+            return;
+        }
+
+        Console.WriteLine($"Analyzing latest scan {analysis.ScanRunId} (scanned {analysis.ScannedAtUtc:yyyy-MM-dd HH:mm} UTC).");
+        Console.WriteLine();
+
+        IReadOnlyList<DuplicateGroup> groups = analysis.Groups;
+        if (groups.Count == 0)
+        {
+            Console.WriteLine("No duplicates found — no hashed content appears at more than one location.");
+            return;
+        }
+
+        Console.WriteLine($"Top {Math.Min(topN, groups.Count)} duplicate set(s) by wasted space (redundant copies × size):");
+        Console.WriteLine();
+
+        int rank = 1;
+        foreach (DuplicateGroup g in groups)
+        {
+            string name = g.DistinctNameCount == 1 ? g.FileName : "<filenames differ>";
+            Console.WriteLine(
+                $"#{rank,-2} {FormatBytes(g.WastedBytes),11} wasted  |  {name}  |  " +
+                $"{g.CopyCount} copies × {FormatBytes(g.SizeBytes)}  |  hash {g.ContentHash[..12]}…");
+
+            foreach (string path in g.SamplePaths)
+                Console.WriteLine($"       {path}");
+            if (g.CopyCount > g.SamplePaths.Count)
+                Console.WriteLine($"       … and {g.CopyCount - g.SamplePaths.Count} more location(s)");
+
+            Console.WriteLine();
+            rank++;
+        }
+
+        long totalWasted = groups.Sum(g => g.WastedBytes);
+        Console.WriteLine($"Total wasted space across the listed set(s): {FormatBytes(totalWasted)}");
+    }
+
     public void ReportFatalError(string message) =>
         Console.Error.WriteLine("\nFatal error during scan: " + message);
+
+    /// <summary>Render a byte count as a human-friendly size (e.g. "1.50 GB").</summary>
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = { "B", "KB", "MB", "GB", "TB", "PB" };
+        double size = bytes;
+        int unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+        return unit == 0 ? $"{bytes} B" : $"{size:0.##} {units[unit]}";
+    }
 
     /// <summary>Hide any password in the connection string before echoing it to the console.</summary>
     private static string Redact(string connectionString)

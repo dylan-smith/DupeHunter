@@ -27,13 +27,13 @@ public sealed class ScanPipeline
 
     public async Task<int> RunAsync(IReadOnlyList<string> roots, CancellationToken ct)
     {
-        await using IAsyncDisposable progress = _reporter.StartProgress(_scanner, _writer);
-
         // Each drive is a separate scan run. Scan them in turn; stop early if one is canceled or fails
-        // so a partial inventory is never silently followed by more drives.
-        foreach (string root in roots)
+        // so a partial inventory is never silently followed by more drives. Each drive prints its own
+        // header line and each pass repaints its own line, so progress reads top-to-bottom per drive.
+        for (int i = 0; i < roots.Count; i++)
         {
-            int code = await ScanDriveAsync(root, ct);
+            _reporter.PrintDriveHeader(i + 1, roots.Count, roots[i]);
+            int code = await ScanDriveAsync(roots[i], ct);
             if (code != 0)
                 return code;
         }
@@ -84,13 +84,24 @@ public sealed class ScanPipeline
     /// </summary>
     private async Task EnumerateMetadataAsync(string root, CancellationToken ct)
     {
-        foreach (FileRecord record in _scanner.EnumerateFiles(root))
-        {
-            ct.ThrowIfCancellationRequested();
-            await _writer.AddAsync(record, ct);
-        }
+        // The scanner/writer counters accumulate across drives; capture baselines so this pass's line
+        // shows only the rows enumerated for the current drive.
+        long filesBase = _scanner.FilesSeen;
+        long writtenBase = _writer.RowsWritten;
+        long skipsBase = _scanner.DirectoriesSkipped;
 
-        await _writer.FlushAsync(ct);
+        await using (_reporter.StartPass("pass 1 enumerate", () =>
+            $"files: {_scanner.FilesSeen - filesBase:N0}  written: {_writer.RowsWritten - writtenBase:N0}  " +
+            $"dirs skipped: {_scanner.DirectoriesSkipped - skipsBase:N0}"))
+        {
+            foreach (FileRecord record in _scanner.EnumerateFiles(root))
+            {
+                ct.ThrowIfCancellationRequested();
+                await _writer.AddAsync(record, ct);
+            }
+
+            await _writer.FlushAsync(ct);
+        }
     }
 
     /// <summary>
@@ -108,28 +119,43 @@ public sealed class ScanPipeline
             CancellationToken = ct,
         };
 
-        long afterId = 0;
-        while (true)
+        // Counters accumulate across drives; baseline them so this pass's line is per-drive.
+        long hashedBase = _scanner.FilesHashed;
+        long errorsBase = _scanner.HashErrors;
+
+        // Pass one wrote exactly the rows pass two will page through, so its count is the bar's total.
+        // processed advances by whole chunks; the timer thread reads it for the bar as it grows.
+        long total = _writer.RowsWrittenThisScan;
+        long processed = 0;
+
+        await using (_reporter.StartPass("pass 2 hash", () =>
+            $"{ConsoleReporter.ProgressBar(processed, total)}  " +
+            $"hashed: {_scanner.FilesHashed - hashedBase:N0}  hash errors: {_scanner.HashErrors - errorsBase:N0}"))
         {
-            IReadOnlyList<PendingHash> chunk = await _writer.ReadNextHashChunkAsync(afterId, ct);
-            if (chunk.Count == 0)
-                break;
-
-            // Rows come back ordered by Id, so the last one is this chunk's high-water mark.
-            afterId = chunk[^1].Id;
-
-            // Hash the chunk in parallel; keep only rows that actually got a hash or hit an error
-            // (files skipped for exceeding the size limit are left with their NULL hash).
-            var updates = new ConcurrentQueue<HashResult>();
-            await Parallel.ForEachAsync(chunk, parallelOpts, (pending, _) =>
+            long afterId = 0;
+            while (true)
             {
-                HashResult result = _scanner.HashFile(pending);
-                if (result.ContentHash is not null || result.Error is not null)
-                    updates.Enqueue(result);
-                return ValueTask.CompletedTask;
-            });
+                IReadOnlyList<PendingHash> chunk = await _writer.ReadNextHashChunkAsync(afterId, ct);
+                if (chunk.Count == 0)
+                    break;
 
-            await _writer.UpdateHashesAsync(updates, ct);
+                // Rows come back ordered by Id, so the last one is this chunk's high-water mark.
+                afterId = chunk[^1].Id;
+
+                // Hash the chunk in parallel; keep only rows that actually got a hash or hit an error
+                // (files skipped for exceeding the size limit are left with their NULL hash).
+                var updates = new ConcurrentQueue<HashResult>();
+                await Parallel.ForEachAsync(chunk, parallelOpts, (pending, _) =>
+                {
+                    HashResult result = _scanner.HashFile(pending);
+                    if (result.ContentHash is not null || result.Error is not null)
+                        updates.Enqueue(result);
+                    return ValueTask.CompletedTask;
+                });
+
+                await _writer.UpdateHashesAsync(updates, ct);
+                processed += chunk.Count;
+            }
         }
     }
 

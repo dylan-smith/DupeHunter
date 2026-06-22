@@ -19,19 +19,56 @@ public sealed class ConsoleReporter
         Console.WriteLine();
     }
 
+    /// <summary>Print a header line naming the drive about to be scanned, e.g. "[1/3] C:\".</summary>
+    public void PrintDriveHeader(int index, int total, string drive) =>
+        Console.WriteLine($"[{index}/{total}] {drive}");
+
     /// <summary>
-    /// Start a 1-second timer that repaints a single in-place progress line. Dispose (await) the
-    /// returned handle to stop it and let any in-flight repaint finish before printing more.
+    /// Start an in-place progress line for a single pass of the current drive. The line is prefixed
+    /// with <paramref name="label"/> and repainted once a second from <paramref name="snapshot"/>.
+    /// Dispose (await) the returned handle to repaint the final values, finalize the line with a
+    /// newline, and stop the timer — so each pass of each drive ends up on its own line.
     /// </summary>
-    public IAsyncDisposable StartProgress(FileScanner scanner, DatabaseWriter writer) =>
-        new Timer(_ =>
+    public IAsyncDisposable StartPass(string label, Func<string> snapshot) =>
+        new PassProgress(label, snapshot);
+
+    /// <summary>
+    /// Render a fixed-width text progress bar like <c>[#########-----------]  45%</c> for a pass whose
+    /// total is known up front. A non-positive <paramref name="total"/> renders as complete.
+    /// </summary>
+    public static string ProgressBar(long done, long total, int width = 20)
+    {
+        double fraction = total <= 0 ? 1.0 : Math.Clamp((double)done / total, 0.0, 1.0);
+        int filled = (int)Math.Round(fraction * width);
+        return $"[{new string('#', filled)}{new string('-', width - filled)}] {fraction * 100,3:0}%";
+    }
+
+    /// <summary>One drive-pass's live progress line: repaints in place, then commits its own line.</summary>
+    private sealed class PassProgress : IAsyncDisposable
+    {
+        private readonly string _label;
+        private readonly Func<string> _snapshot;
+        private readonly Timer _timer;
+
+        public PassProgress(string label, Func<string> snapshot)
         {
-            // Pass one drives "files"/"written"; pass two drives "hashed". Both are shown so the
-            // shift from enumeration to hashing is visible on a single line.
-            Console.Write($"\r  files: {scanner.FilesSeen:N0}  written: {writer.RowsWritten:N0}  " +
-                          $"hashed: {scanner.FilesHashed:N0}  dirs skipped: {scanner.DirectoriesSkipped:N0}  " +
-                          $"hash errors: {scanner.HashErrors:N0}   ");
-        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+            _label = label;
+            _snapshot = snapshot;
+            Paint();
+            _timer = new Timer(_ => Paint(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+
+        // Trailing spaces clear any leftover characters from a previously longer line.
+        private void Paint() => Console.Write($"\r    {_label}: {_snapshot()}   ");
+
+        public async ValueTask DisposeAsync()
+        {
+            // Awaiting disposal guarantees no repaint is in flight before we print the final values.
+            await _timer.DisposeAsync();
+            Paint();
+            Console.WriteLine();
+        }
+    }
 
     /// <summary>Print the final tally once the scan has finished (or been canceled).</summary>
     public void PrintSummary(FileScanner scanner, DatabaseWriter writer, TimeSpan elapsed)

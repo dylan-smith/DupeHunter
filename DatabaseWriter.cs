@@ -36,6 +36,12 @@ END";
     /// <summary>Rows written for the current drive's scan run; reset by each <see cref="BeginScanAsync"/>.</summary>
     private long _rowsWrittenThisScan;
 
+    /// <summary>
+    /// Rows written for the current drive's scan run so far — also the total number of rows pass two
+    /// will page through to hash, so it serves as the denominator for the hash-pass progress bar.
+    /// </summary>
+    public long RowsWrittenThisScan => _rowsWrittenThisScan;
+
     /// <summary>Total rows written across every drive scanned this process (for the final summary).</summary>
     public long RowsWritten;
 

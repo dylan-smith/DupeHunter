@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "fileindexer (E: drive)": {
+      "commandName": "Project",
+      "commandLineArgs": "--drives E"
+    }
+  }
+}

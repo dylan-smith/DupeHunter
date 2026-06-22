@@ -13,8 +13,10 @@ public sealed partial class Options
         sb.AppendLine("  fileindexer [options]");
         sb.AppendLine();
         sb.AppendLine("OPTIONS:");
-        sb.AppendLine("  -d, --drives <list>          Comma-separated drives to scan (e.g. C,D or C:\\,E:\\).");
+        sb.AppendLine("  -d, --drives <list>          Comma-separated drives (e.g. C,D or C:\\,E:\\).");
+        sb.AppendLine("                               Scan mode: drives to scan; each drive is its own scan run.");
         sb.AppendLine("                               Omit to scan ALL fixed drives.");
+        sb.AppendLine("                               Analyze mode: drives whose latest scans to combine.");
         sb.AppendLine("  -c, --connection-string <s>  SQL Server connection string.");
         sb.AppendLine("                               Default: localhost / FileInventory / integrated auth.");
         sb.AppendLine("  -t, --table <name>           Destination table. Default: dbo.Files");
@@ -31,9 +33,11 @@ public sealed partial class Options
         sb.AppendLine("  -h, --help                   Show this help.");
         sb.AppendLine();
         sb.AppendLine("ANALYSIS (runs automatically after a scan; reports duplicate files):");
-        sb.AppendLine("      --analyze, --duplicates  Analyze an existing table WITHOUT scanning. Reports");
-        sb.AppendLine("                               files whose content (hash + size) appears in multiple");
-        sb.AppendLine("                               locations, ranked by wasted space.");
+        sb.AppendLine("      --analyze, --duplicates  Analyze an existing table WITHOUT scanning. Combines the");
+        sb.AppendLine("                               latest completed scan of each drive (or just the drives");
+        sb.AppendLine("                               named with --drives) and reports files whose content");
+        sb.AppendLine("                               (hash + size) appears in multiple locations, ranked by");
+        sb.AppendLine("                               wasted space.");
         sb.AppendLine("      --no-analyze             Scan only; skip the post-scan duplicate analysis.");
         sb.AppendLine("      --top <n>                Number of duplicate sets to list. Default: 10");
         sb.AppendLine();
@@ -43,6 +47,7 @@ public sealed partial class Options
         sb.AppendLine("  fileindexer --drives C --no-hash --recreate");
         sb.AppendLine("  fileindexer --analyze");
         sb.AppendLine("  fileindexer --analyze --top 25");
+        sb.AppendLine("  fileindexer --analyze --drives C,D   (combine only C and D's latest scans)");
         return sb.ToString();
     }
 }

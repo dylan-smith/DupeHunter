@@ -17,11 +17,22 @@ For every file it writes one row containing:
 | `DateCreatedUtc`  | Creation time (UTC)                                  |
 | `ContentHash`     | SHA-256 of the file contents (lower-case hex)        |
 | `ScanError`       | Populated if the file couldn't be hashed (e.g. lock) |
-| `ScanRunId`       | GUID identifying this scan run                       |
+| `ScanRunId`       | GUID identifying this scan run (one run per drive)   |
 | `ScannedAtUtc`    | When the row was written                             |
 
 The table is created automatically if it doesn't exist, as is the database named in the
 connection string.
+
+## Scans and analysis
+
+Each drive is scanned as its own **scan run** with a unique `ScanRunId`, logged to `dbo.Scans`
+(start/finish time, status, and which drive). Scanning `C,D` therefore produces two runs.
+
+When analyzing (automatically after a scan, or via `--analyze`), the tool takes the **latest
+completed scan of each drive** and combines them, so duplicates are found across drives. Pass
+`--drives` to restrict the analysis to specific drives' latest scans. Scans that were canceled,
+failed, or never finished are never analyzed, and a superseded older scan of a drive is ignored
+once a newer one completes.
 
 ## Requirements
 

@@ -23,15 +23,20 @@ END";
     private readonly Options _options;
     private readonly SqlConnection _connection;
     private readonly DataTable _buffer;
-    private readonly string _scanRunId;
 
+    /// <summary>ScanRunId of the drive currently being scanned. Reset by each <see cref="BeginScanAsync"/>.</summary>
+    private string _scanRunId = string.Empty;
+
+    /// <summary>Rows written for the current drive's scan run; reset by each <see cref="BeginScanAsync"/>.</summary>
+    private long _rowsWrittenThisScan;
+
+    /// <summary>Total rows written across every drive scanned this process (for the final summary).</summary>
     public long RowsWritten;
 
     public DatabaseWriter(Options options)
     {
         _options = options;
         _connection = new SqlConnection(options.ConnectionString);
-        _scanRunId = Guid.NewGuid().ToString("N");
         _buffer = BuildSchemaTable();
     }
 
@@ -51,25 +56,33 @@ END";
 
         // The scan log is an audit history across runs, so it is created but never dropped here.
         await ExecuteAsync(CreateScansTableSql(), ct);
+        // Bring an older scan log (created before per-drive scans) up to the current schema.
+        await ExecuteAsync(MigrateScansTableSql(), ct);
     }
 
     /// <summary>
-    /// Record the start of this scan run: inserts a row tagged <c>Running</c> with no completion time.
+    /// Record the start of a scan run for a single <paramref name="drive"/>: generates a fresh
+    /// <c>ScanRunId</c> and inserts a row tagged <c>Running</c> with no completion time. Every drive is
+    /// its own scan run, so subsequent rows are tagged with this id until the next <see cref="BeginScanAsync"/>.
     /// A row that stays <c>Running</c> (or keeps a NULL <c>CompletedAtUtc</c>) marks a scan that never
-    /// finished — e.g. the process was killed — and can be excluded from analysis.
+    /// finished — e.g. the process was killed — and is excluded from analysis.
     /// </summary>
-    public async Task BeginScanAsync(IReadOnlyList<string> roots, CancellationToken ct)
+    public async Task BeginScanAsync(string drive, CancellationToken ct)
     {
+        _scanRunId = Guid.NewGuid().ToString("N");
+        _rowsWrittenThisScan = 0;
+
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = $@"
 INSERT INTO {_options.ScanTableName}
-    (ScanRunId, StartedAtUtc, Status, MachineName, Roots, ComputeHash)
-VALUES (@id, @started, @status, @machine, @roots, @hash);";
+    (ScanRunId, StartedAtUtc, Status, MachineName, Drive, Roots, ComputeHash)
+VALUES (@id, @started, @status, @machine, @drive, @roots, @hash);";
         cmd.Parameters.AddWithValue("@id", _scanRunId);
         cmd.Parameters.AddWithValue("@started", DateTime.UtcNow);
         cmd.Parameters.AddWithValue("@status", "Running");
         cmd.Parameters.AddWithValue("@machine", Environment.MachineName);
-        cmd.Parameters.AddWithValue("@roots", string.Join(", ", roots));
+        cmd.Parameters.AddWithValue("@drive", drive);
+        cmd.Parameters.AddWithValue("@roots", drive);
         cmd.Parameters.AddWithValue("@hash", _options.ComputeHash);
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -90,7 +103,7 @@ SET CompletedAtUtc = @completed,
 WHERE ScanRunId = @id;";
         cmd.Parameters.AddWithValue("@completed", DateTime.UtcNow);
         cmd.Parameters.AddWithValue("@status", status);
-        cmd.Parameters.AddWithValue("@files", RowsWritten);
+        cmd.Parameters.AddWithValue("@files", _rowsWrittenThisScan);
         cmd.Parameters.AddWithValue("@error", (object?)error ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@id", _scanRunId);
         await cmd.ExecuteNonQueryAsync(ct);
@@ -169,6 +182,7 @@ WHERE ScanRunId = @id;";
 
         await bulk.WriteToServerAsync(_buffer, ct);
         RowsWritten += _buffer.Rows.Count;
+        _rowsWrittenThisScan += _buffer.Rows.Count;
         _buffer.Clear();
     }
 
@@ -236,12 +250,26 @@ BEGIN
         CompletedAtUtc DATETIME2(3)  NULL,
         Status         NVARCHAR(20)  NOT NULL,
         MachineName    NVARCHAR(256) NULL,
+        Drive          NVARCHAR(260) NULL,
         Roots          NVARCHAR(MAX) NULL,
         ComputeHash    BIT           NOT NULL,
         FilesWritten   BIGINT        NULL,
         ScanError      NVARCHAR(MAX) NULL
     );
     CREATE INDEX IX_Scans_Status ON {_options.ScanTableName} (Status);
+    -- Speeds up ""latest completed scan per drive"" lookups during analysis.
+    CREATE INDEX IX_Scans_Drive ON {_options.ScanTableName} (Drive, Status, CompletedAtUtc);
+END";
+
+    /// <summary>
+    /// Add the per-drive <c>Drive</c> column to a scan log created before per-drive scans existed.
+    /// Pre-existing rows keep a NULL <c>Drive</c> and are simply not matched by per-drive analysis.
+    /// </summary>
+    private string MigrateScansTableSql() => $@"
+IF OBJECT_ID('{_options.ScanTableName}', 'U') IS NOT NULL
+   AND COL_LENGTH('{_options.ScanTableName}', 'Drive') IS NULL
+BEGIN
+    ALTER TABLE {_options.ScanTableName} ADD Drive NVARCHAR(260) NULL;
 END";
 
     /// <summary>Create the target database if the connection points at one that doesn't exist yet.</summary>

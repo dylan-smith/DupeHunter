@@ -47,13 +47,23 @@ public sealed class ConsoleReporter
     /// <summary>Print the ranked duplicate sets produced by <see cref="DuplicateAnalyzer"/>.</summary>
     public void PrintDuplicates(DuplicateAnalysis analysis, int topN)
     {
-        if (analysis.ScanRunId is null)
+        if (analysis.Scans.Count == 0)
         {
-            Console.WriteLine($"No scan data found in {_options.TableName}. Run a scan first.");
+            Console.WriteLine($"No completed scan data found in {_options.TableName}. Run a scan first.");
             return;
         }
 
-        Console.WriteLine($"Analyzing latest scan {analysis.ScanRunId} (scanned {analysis.ScannedAtUtc:yyyy-MM-dd HH:mm} UTC).");
+        if (analysis.Scans.Count == 1)
+        {
+            ScanRef s = analysis.Scans[0];
+            Console.WriteLine($"Analyzing latest scan for {s.Drive} — scan {s.ScanRunId} (scanned {s.CompletedAtUtc:yyyy-MM-dd HH:mm} UTC).");
+        }
+        else
+        {
+            Console.WriteLine($"Analyzing the latest completed scan of {analysis.Scans.Count} drive(s), combined:");
+            foreach (ScanRef s in analysis.Scans)
+                Console.WriteLine($"  {s.Drive,-10} scan {s.ScanRunId} (scanned {s.CompletedAtUtc:yyyy-MM-dd HH:mm} UTC)");
+        }
         Console.WriteLine();
 
         IReadOnlyList<DuplicateGroup> groups = analysis.Groups;

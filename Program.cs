@@ -28,7 +28,8 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-// Analysis mode reads an already-scanned table and exits; it never touches the drives.
+// Analysis mode reads an already-scanned table and exits; it never touches the drives. A successful
+// analysis is followed by an automatic database cleanup unless --no-cleanup is given.
 if (options.Analyze)
 {
     var analysisReporter = new ConsoleReporter(options);
@@ -38,6 +39,7 @@ if (options.Analyze)
         DuplicateAnalysis analysis =
             await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
         analysisReporter.PrintDuplicates(analysis, options.TopN);
+        await MaybeCleanupAfterAnalysisAsync(cts.Token);
         return 0;
     }
     catch (OperationCanceledException)
@@ -59,32 +61,7 @@ if (options.Cleanup)
 {
     try
     {
-        var cleaner = new DatabaseCleaner(options);
-        Console.WriteLine("Determining retained runs (latest completed scan per drive)...");
-        CleanupPlan plan = await cleaner.PlanAsync(cts.Token);
-
-        Console.WriteLine($"Retaining {plan.KeptScans.Count} run(s):");
-        foreach (ScanRef s in plan.KeptScans)
-            Console.WriteLine($"  {s.Drive,-6} {s.ScanRunId}  completed {s.CompletedAtUtc:u}");
-        Console.WriteLine($"Rows to delete: {plan.FilesToDelete:n0} file/folder row(s), {plan.SkipsToDelete:n0} skip(s).");
-        Console.WriteLine("The scan audit log is preserved.");
-
-        if (plan.FilesToDelete == 0 && plan.SkipsToDelete == 0)
-        {
-            Console.WriteLine("Nothing to delete; database is already clean.");
-            return 0;
-        }
-
-        if (options.DryRun)
-        {
-            Console.WriteLine("Dry run: no rows were deleted.");
-            return 0;
-        }
-
-        var progress = new Progress<long>(n => Console.Write($"\rDeleting... {n:n0} rows removed"));
-        CleanupResult result = await cleaner.ExecuteAsync(plan, progress, cts.Token);
-        Console.WriteLine();
-        Console.WriteLine($"Deleted {result.FilesDeleted:n0} file row(s) and {result.SkipsDeleted:n0} skip row(s).");
+        await RunCleanupAsync(cts.Token);
         return 0;
     }
     catch (OperationCanceledException)
@@ -147,6 +124,7 @@ if (exitCode == 0 && options.ComputeHash && !options.NoAnalyze)
         DuplicateAnalysis analysis =
             await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
         reporter.PrintDuplicates(analysis, options.TopN);
+        await MaybeCleanupAfterAnalysisAsync(cts.Token);
     }
     catch (OperationCanceledException) { /* user canceled; summary already printed */ }
     catch (Exception ex)
@@ -157,3 +135,58 @@ if (exitCode == 0 && options.ComputeHash && !options.NoAnalyze)
 }
 
 return exitCode;
+
+// Prune the database to the latest completed scan per drive, printing the plan and result. Shared by
+// the standalone --cleanup mode and the automatic post-analysis cleanup. Honors --dry-run.
+async Task RunCleanupAsync(CancellationToken ct)
+{
+    var cleaner = new DatabaseCleaner(options);
+    Console.WriteLine("Determining retained runs (latest completed scan per drive)...");
+    CleanupPlan plan = await cleaner.PlanAsync(ct);
+
+    Console.WriteLine($"Retaining {plan.KeptScans.Count} run(s):");
+    foreach (ScanRef s in plan.KeptScans)
+        Console.WriteLine($"  {s.Drive,-6} {s.ScanRunId}  completed {s.CompletedAtUtc:u}");
+    Console.WriteLine($"Rows to delete: {plan.FilesToDelete:n0} file/folder row(s), {plan.SkipsToDelete:n0} skip(s).");
+    Console.WriteLine("The scan audit log is preserved.");
+
+    if (plan.FilesToDelete == 0 && plan.SkipsToDelete == 0)
+    {
+        Console.WriteLine("Nothing to delete; database is already clean.");
+        return;
+    }
+
+    if (options.DryRun)
+    {
+        Console.WriteLine("Dry run: no rows were deleted.");
+        return;
+    }
+
+    var progress = new Progress<long>(n => Console.Write($"\rDeleting... {n:n0} rows removed"));
+    CleanupResult result = await cleaner.ExecuteAsync(plan, progress, ct);
+    Console.WriteLine();
+    Console.WriteLine($"Deleted {result.FilesDeleted:n0} file row(s) and {result.SkipsDeleted:n0} skip row(s).");
+}
+
+// Run cleanup after a successful analysis unless suppressed. A cleanup failure here is non-fatal: the
+// analysis already succeeded, so warn and carry on rather than reporting overall failure.
+async Task MaybeCleanupAfterAnalysisAsync(CancellationToken ct)
+{
+    if (options.NoCleanup)
+        return;
+
+    Console.WriteLine();
+    try
+    {
+        await RunCleanupAsync(ct);
+    }
+    catch (OperationCanceledException)
+    {
+        Console.Error.WriteLine("\nCleanup canceled.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("Analysis succeeded, but cleanup failed:");
+        Console.Error.WriteLine("  " + ex.Message);
+    }
+}

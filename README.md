@@ -34,6 +34,11 @@ completed scan of each drive** and combines them, so duplicates are found across
 failed, or never finished are never analyzed, and a superseded older scan of a drive is ignored
 once a newer one completes.
 
+After a successful analysis (whether post-scan or a standalone `--analyze`), the tool automatically
+runs a database **cleanup**, pruning everything but the latest completed scan of each drive (the same
+runs analysis just used). Pass `--no-cleanup` to skip it. The `dbo.Scans` audit log is always
+preserved, and `--dry-run` previews the cleanup without deleting anything.
+
 ## Requirements
 
 - .NET 10 SDK

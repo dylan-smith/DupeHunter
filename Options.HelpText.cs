@@ -47,7 +47,9 @@ public sealed partial class Options
         sb.AppendLine("                               delete every other run's file/skip rows. Considers all");
         sb.AppendLine("                               drives regardless of --drives. The scan audit log");
         sb.AppendLine("                               (dbo.Scans) is preserved. Assumes no scan is running.");
-        sb.AppendLine("      --dry-run                With --cleanup, report what would be deleted, delete nothing.");
+        sb.AppendLine("                               Runs automatically after a successful analysis.");
+        sb.AppendLine("      --no-cleanup             Skip the cleanup that otherwise runs after analysis.");
+        sb.AppendLine("      --dry-run                With cleanup, report what would be deleted, delete nothing.");
         sb.AppendLine();
         sb.AppendLine("EXAMPLES:");
         sb.AppendLine("  fileindexer --drives C,D");

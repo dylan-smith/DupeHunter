@@ -63,6 +63,12 @@ public sealed partial class Options
     /// <summary>With <c>--cleanup</c>, report what would be deleted without deleting anything.</summary>
     public bool DryRun { get; set; }
 
+    /// <summary>
+    /// Skip the database cleanup that otherwise runs automatically after a successful duplicate analysis
+    /// (both the post-scan analysis and a standalone <c>--analyze</c> run). Has no effect on <c>--cleanup</c>.
+    /// </summary>
+    public bool NoCleanup { get; set; }
+
     public bool ShowHelp { get; set; }
 
     public static Options Parse(string[] args)
@@ -161,6 +167,10 @@ public sealed partial class Options
 
                 case "--dry-run":
                     o.DryRun = true;
+                    break;
+
+                case "--no-cleanup":
+                    o.NoCleanup = true;
                     break;
 
                 default:

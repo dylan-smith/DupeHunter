@@ -68,7 +68,8 @@ if (roots.Count == 0)
 var reporter = new ConsoleReporter(options);
 reporter.PrintBanner(roots);
 
-var scanner = new FileScanner(options);
+// This writer sets up the schema once and is then reused for the first drive; the pipeline creates
+// (and disposes) one additional writer per remaining drive so drives can scan in parallel.
 using var writer = new DatabaseWriter(options);
 
 try
@@ -83,10 +84,10 @@ catch (Exception ex)
 }
 
 var sw = Stopwatch.StartNew();
-int exitCode = await new ScanPipeline(options, scanner, writer, reporter).RunAsync(roots, cts.Token);
+(int exitCode, ScanTotals totals) = await new ScanPipeline(options, reporter).RunAsync(roots, writer, cts.Token);
 sw.Stop();
 
-reporter.PrintSummary(scanner, writer, sw.Elapsed);
+reporter.PrintSummary(totals, sw.Elapsed);
 
 // Once the scan completes cleanly, surface duplicates straight away (unless suppressed, or there
 // are no hashes to compare). Use --no-analyze to skip, or --analyze on its own to re-run later.

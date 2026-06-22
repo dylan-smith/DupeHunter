@@ -109,6 +109,9 @@ ORDER BY SUM(SizeBytes) DESC;
   (name, path, size, dates) with a NULL hash; pass two reads those rows back and fills in the
   content hashes. Committing the full inventory before hashing means an interrupted hashing pass
   still leaves a complete file listing behind. `--no-hash` runs pass one only.
+- Drives are scanned **in parallel** — each gets its own database connection and scan run, and the
+  live progress display shows every drive's passes at once (one block of lines per drive). With
+  several drives hashing together, total hashing threads can reach `--parallelism` × drive count.
 - Hashing streams the file (1 MB buffer) so memory stays flat even on very large files.
 - Files open in other processes are read with shared access where possible; unreadable files are
   still recorded with their metadata and a populated `ScanError`.

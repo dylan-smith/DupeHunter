@@ -19,18 +19,19 @@ public sealed class ConsoleReporter
         Console.WriteLine();
     }
 
-    /// <summary>Print a header line naming the drive about to be scanned, e.g. "[1/3] C:\".</summary>
-    public void PrintDriveHeader(int index, int total, string drive) =>
-        Console.WriteLine($"[{index}/{total}] {drive}");
-
     /// <summary>
-    /// Start an in-place progress line for a single pass of the current drive. The line is prefixed
-    /// with <paramref name="label"/> and repainted once a second from <paramref name="snapshot"/>.
-    /// Dispose (await) the returned handle to repaint the final values, finalize the line with a
-    /// newline, and stop the timer — so each pass of each drive ends up on its own line.
+    /// Start a live progress display with one block of lines per drive (a header line plus one line
+    /// per pass), all repainted together every second so several drives scanning in parallel each show
+    /// their own progress at the same time. Wire each returned <see cref="MultiProgress.Slot"/> to its
+    /// drive's passes; dispose (await) the display to stop repainting and leave the final values shown.
     /// </summary>
-    public IAsyncDisposable StartPass(string label, Func<string> snapshot) =>
-        new PassProgress(label, snapshot);
+    public MultiProgress StartMultiProgress(IReadOnlyList<string> drives, bool hasHashPass)
+    {
+        var slots = new MultiProgress.Slot[drives.Count];
+        for (int i = 0; i < drives.Count; i++)
+            slots[i] = new MultiProgress.Slot($"[{i + 1}/{drives.Count}] {drives[i]}", hasHashPass);
+        return new MultiProgress(slots);
+    }
 
     /// <summary>
     /// Render a fixed-width text progress bar like <c>[#########-----------]  45%</c> for a pass whose
@@ -43,45 +44,18 @@ public sealed class ConsoleReporter
         return $"[{new string('#', filled)}{new string('-', width - filled)}] {fraction * 100,3:0}%";
     }
 
-    /// <summary>One drive-pass's live progress line: repaints in place, then commits its own line.</summary>
-    private sealed class PassProgress : IAsyncDisposable
-    {
-        private readonly string _label;
-        private readonly Func<string> _snapshot;
-        private readonly Timer _timer;
-
-        public PassProgress(string label, Func<string> snapshot)
-        {
-            _label = label;
-            _snapshot = snapshot;
-            Paint();
-            _timer = new Timer(_ => Paint(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
-        }
-
-        // Trailing spaces clear any leftover characters from a previously longer line.
-        private void Paint() => Console.Write($"\r    {_label}: {_snapshot()}   ");
-
-        public async ValueTask DisposeAsync()
-        {
-            // Awaiting disposal guarantees no repaint is in flight before we print the final values.
-            await _timer.DisposeAsync();
-            Paint();
-            Console.WriteLine();
-        }
-    }
-
-    /// <summary>Print the final tally once the scan has finished (or been canceled).</summary>
-    public void PrintSummary(FileScanner scanner, DatabaseWriter writer, TimeSpan elapsed)
+    /// <summary>Print the final, aggregated tally once every drive has finished (or been canceled).</summary>
+    public void PrintSummary(ScanTotals totals, TimeSpan elapsed)
     {
         Console.WriteLine();
         Console.WriteLine();
         Console.WriteLine("Done.");
-        Console.WriteLine($"  Files seen:       {scanner.FilesSeen:N0}");
-        Console.WriteLine($"  Rows written:     {writer.RowsWritten:N0}");
-        Console.WriteLine($"  Files hashed:     {scanner.FilesHashed:N0}");
-        string skipNote = scanner.DirectoriesSkipped > 0 ? $"  (logged to {_options.SkipTableName})" : "";
-        Console.WriteLine($"  Directories skipped (access): {scanner.DirectoriesSkipped:N0}{skipNote}");
-        Console.WriteLine($"  Hash errors:      {scanner.HashErrors:N0}");
+        Console.WriteLine($"  Files seen:       {totals.FilesSeen:N0}");
+        Console.WriteLine($"  Rows written:     {totals.RowsWritten:N0}");
+        Console.WriteLine($"  Files hashed:     {totals.FilesHashed:N0}");
+        string skipNote = totals.DirectoriesSkipped > 0 ? $"  (logged to {_options.SkipTableName})" : "";
+        Console.WriteLine($"  Directories skipped (access): {totals.DirectoriesSkipped:N0}{skipNote}");
+        Console.WriteLine($"  Hash errors:      {totals.HashErrors:N0}");
         Console.WriteLine($"  Elapsed:          {elapsed:hh\\:mm\\:ss}");
     }
 

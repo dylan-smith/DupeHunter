@@ -52,6 +52,14 @@ END";
         _buffer = BuildSchemaTable();
     }
 
+    /// <summary>
+    /// Open this writer's connection without creating, dropping, or migrating any schema. Used for the
+    /// extra per-drive writers once a first writer has run <see cref="InitializeAsync"/> to set up the
+    /// tables, so drives scanning in parallel each get an independent connection (and therefore their
+    /// own session-scoped hash-staging temp table).
+    /// </summary>
+    public Task OpenConnectionAsync(CancellationToken ct) => _connection.OpenAsync(ct);
+
     public async Task InitializeAsync(CancellationToken ct)
     {
         await EnsureDatabaseExistsAsync(ct);

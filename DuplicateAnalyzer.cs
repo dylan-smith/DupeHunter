@@ -28,9 +28,14 @@ public sealed class DuplicateGroup
 /// The outcome of a duplicate analysis: the duplicate sets plus which scan run they came from.
 /// <see cref="ScanRunId"/> is null when the table holds no data yet.
 /// </summary>
+/// <param name="TotalWastedBytes">
+/// Reclaimable space across <em>every</em> duplicate set in the run, not just the ones in
+/// <see cref="Groups"/>. This is the grand total the user could recover by deduplicating.
+/// </param>
 public sealed record DuplicateAnalysis(
     string? ScanRunId,
     DateTime? ScannedAtUtc,
+    long TotalWastedBytes,
     IReadOnlyList<DuplicateGroup> Groups);
 
 /// <summary>
@@ -57,14 +62,15 @@ public sealed class DuplicateAnalyzer
 
         (string? runId, DateTime? scannedAt) = await GetLatestScanRunAsync(conn, ct);
         if (runId is null)
-            return new DuplicateAnalysis(null, null, Array.Empty<DuplicateGroup>());
+            return new DuplicateAnalysis(null, null, 0, Array.Empty<DuplicateGroup>());
 
+        long totalWasted = await QueryTotalWastedAsync(conn, runId, ct);
         List<DuplicateGroup> groups = await QueryTopGroupsAsync(conn, runId, topN, ct);
 
         foreach (DuplicateGroup g in groups)
             await LoadSamplePathsAsync(conn, runId, g, samplePathsPerGroup, ct);
 
-        return new DuplicateAnalysis(runId, scannedAt, groups);
+        return new DuplicateAnalysis(runId, scannedAt, totalWasted, groups);
     }
 
     /// <summary>The scan run that wrote the most recent row, identified by its latest <c>ScannedAtUtc</c>.</summary>
@@ -82,6 +88,31 @@ ORDER BY ScannedAtUtc DESC, Id DESC;";
             return (null, null);
 
         return (reader.GetString(0).TrimEnd(), reader.GetDateTime(1));
+    }
+
+    /// <summary>
+    /// Sum the reclaimable space over <em>all</em> duplicate sets in the run — every set of identical
+    /// content contributes (copies − 1) × size. This is the total before the top-N cut is applied.
+    /// </summary>
+    private async Task<long> QueryTotalWastedAsync(SqlConnection conn, string runId, CancellationToken ct)
+    {
+        string sql = $@"
+SELECT COALESCE(SUM(WastedBytes), 0)
+FROM (
+    SELECT CAST(COUNT(*) - 1 AS BIGINT) * SizeBytes AS WastedBytes
+    FROM {_options.TableName}
+    WHERE ScanRunId = @runId AND ContentHash IS NOT NULL
+    GROUP BY ContentHash, SizeBytes
+    HAVING COUNT(*) > 1
+) AS perGroup;";
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue("@runId", runId);
+
+        object? result = await cmd.ExecuteScalarAsync(ct);
+        return result is long total ? total : Convert.ToInt64(result);
     }
 
     private async Task<List<DuplicateGroup>> QueryTopGroupsAsync(

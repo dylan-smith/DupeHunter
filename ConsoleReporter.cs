@@ -63,6 +63,8 @@ public sealed class ConsoleReporter
             return;
         }
 
+        Console.WriteLine($"Total wasted space across all duplicate set(s): {FormatBytes(analysis.TotalWastedBytes)}");
+        Console.WriteLine();
         Console.WriteLine($"Top {Math.Min(topN, groups.Count)} duplicate set(s) by wasted space (redundant copies × size):");
         Console.WriteLine();
 
@@ -82,9 +84,6 @@ public sealed class ConsoleReporter
             Console.WriteLine();
             rank++;
         }
-
-        long totalWasted = groups.Sum(g => g.WastedBytes);
-        Console.WriteLine($"Total wasted space across the listed set(s): {FormatBytes(totalWasted)}");
     }
 
     public void ReportFatalError(string message) =>

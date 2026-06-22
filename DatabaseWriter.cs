@@ -20,9 +20,15 @@ BEGIN
     EXEC sp_executesql @sql;
 END";
 
+    /// <summary>Session-scoped staging table that pass two bulk-loads hashes into before a set-based UPDATE join.</summary>
+    private const string HashStagingTable = "#HashUpdates";
+
     private readonly Options _options;
     private readonly SqlConnection _connection;
     private readonly DataTable _buffer;
+
+    /// <summary>Reusable staging buffer for pass-two hash updates; created by <see cref="BeginHashPassAsync"/>.</summary>
+    private DataTable? _hashBuffer;
 
     /// <summary>ScanRunId of the drive currently being scanned. Reset by each <see cref="BeginScanAsync"/>.</summary>
     private string _scanRunId = string.Empty;
@@ -147,7 +153,10 @@ WHERE ScanRunId = @id;";
         await bulk.WriteToServerAsync(table, ct);
     }
 
-    /// <summary>Add a record to the buffer; flushes automatically once the batch size is reached.</summary>
+    /// <summary>
+    /// Pass one: add a metadata record to the buffer; flushes automatically once the batch size is
+    /// reached. The content hash is left NULL here and filled in later by the pass-two hashing.
+    /// </summary>
     public async Task AddAsync(FileRecord r, CancellationToken ct)
     {
         DataRow row = _buffer.NewRow();
@@ -156,8 +165,8 @@ WHERE ScanRunId = @id;";
         row["SizeBytes"] = r.SizeBytes;
         row["DateModifiedUtc"] = r.DateModifiedUtc;
         row["DateCreatedUtc"] = r.DateCreatedUtc;
-        row["ContentHash"] = (object?)r.ContentHash ?? DBNull.Value;
-        row["ScanError"] = (object?)r.Error ?? DBNull.Value;
+        row["ContentHash"] = DBNull.Value;
+        row["ScanError"] = DBNull.Value;
         row["ScanRunId"] = _scanRunId;
         row["ScannedAtUtc"] = DateTime.UtcNow;
         _buffer.Rows.Add(row);
@@ -186,7 +195,107 @@ WHERE ScanRunId = @id;";
         _buffer.Clear();
     }
 
+    // --- pass two: hashing ----------------------------------------------
+
+    /// <summary>
+    /// Prepare for the hashing pass: create the session-scoped staging table that
+    /// <see cref="UpdateHashesAsync"/> bulk-loads into, and reset its in-memory buffer. Call once
+    /// per drive before paging through its rows with <see cref="ReadNextHashChunkAsync"/>.
+    /// </summary>
+    public async Task BeginHashPassAsync(CancellationToken ct)
+    {
+        await ExecuteAsync($@"
+IF OBJECT_ID('tempdb..{HashStagingTable}') IS NOT NULL DROP TABLE {HashStagingTable};
+CREATE TABLE {HashStagingTable} (
+    Id          BIGINT        NOT NULL PRIMARY KEY,
+    ContentHash CHAR(64)      NULL,
+    ScanError   NVARCHAR(MAX) NULL
+);", ct);
+
+        _hashBuffer ??= BuildHashStagingTable();
+        _hashBuffer.Clear();
+    }
+
+    /// <summary>
+    /// Read the next chunk of this scan run's rows to hash, paging forward by <c>Id</c> so every row
+    /// is returned exactly once regardless of whether it has been hashed yet. Pass <c>0</c> for
+    /// <paramref name="afterId"/> on the first call, then the last returned Id on each subsequent call;
+    /// an empty result means the pass is done. Paging by Id (rather than filtering on a NULL hash)
+    /// avoids re-reading size-skipped rows forever and keeps each read fully complete before the
+    /// matching update runs, so the read never contends with the update on the same connection.
+    /// </summary>
+    public async Task<IReadOnlyList<PendingHash>> ReadNextHashChunkAsync(long afterId, CancellationToken ct)
+    {
+        await using var cmd = _connection.CreateCommand();
+        cmd.CommandText = $@"
+SELECT TOP (@take) Id, FullPath, SizeBytes
+FROM {_options.TableName}
+WHERE ScanRunId = @id AND Id > @afterId
+ORDER BY Id;";
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue("@take", _options.BatchSize);
+        cmd.Parameters.AddWithValue("@id", _scanRunId);
+        cmd.Parameters.AddWithValue("@afterId", afterId);
+
+        var chunk = new List<PendingHash>(_options.BatchSize);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            chunk.Add(new PendingHash(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)));
+        return chunk;
+    }
+
+    /// <summary>
+    /// Apply a batch of computed hashes to their rows: bulk-load them into the staging table, then a
+    /// single set-based UPDATE join fills in the hash (and any hashing error). Safe to call with an
+    /// empty set. Hashing errors are recorded without clobbering an existing pass-one error.
+    /// </summary>
+    public async Task UpdateHashesAsync(IReadOnlyCollection<HashResult> results, CancellationToken ct)
+    {
+        if (results.Count == 0)
+            return;
+
+        _hashBuffer!.Clear();
+        foreach (HashResult r in results)
+        {
+            DataRow row = _hashBuffer.NewRow();
+            row["Id"] = r.Id;
+            row["ContentHash"] = (object?)r.ContentHash ?? DBNull.Value;
+            row["ScanError"] = (object?)r.Error ?? DBNull.Value;
+            _hashBuffer.Rows.Add(row);
+        }
+
+        await ExecuteAsync($"TRUNCATE TABLE {HashStagingTable};", ct);
+
+        using (var bulk = new SqlBulkCopy(_connection)
+        {
+            DestinationTableName = HashStagingTable,
+            BulkCopyTimeout = 0,
+            BatchSize = _options.BatchSize,
+        })
+        {
+            foreach (DataColumn col in _hashBuffer.Columns)
+                bulk.ColumnMappings.Add(col.ColumnName, col.ColumnName);
+            await bulk.WriteToServerAsync(_hashBuffer, ct);
+        }
+
+        await ExecuteAsync($@"
+UPDATE f
+SET f.ContentHash = h.ContentHash,
+    f.ScanError   = ISNULL(f.ScanError, h.ScanError)
+FROM {_options.TableName} f
+INNER JOIN {HashStagingTable} h ON f.Id = h.Id;", ct);
+    }
+
     // --- helpers ---------------------------------------------------------
+
+    private static DataTable BuildHashStagingTable()
+    {
+        var t = new DataTable();
+        t.Columns.Add("Id", typeof(long));
+        t.Columns.Add("ContentHash", typeof(string));
+        t.Columns.Add("ScanError", typeof(string));
+        return t;
+    }
 
     private static DataTable BuildSchemaTable()
     {

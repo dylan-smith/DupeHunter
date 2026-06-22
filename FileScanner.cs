@@ -15,6 +15,7 @@ public sealed class FileScanner(Options options)
     private readonly Options _options = options;
 
     public long FilesSeen;
+    public long FilesHashed;
     public long DirectoriesSkipped;
     public long HashErrors;
 
@@ -107,19 +108,20 @@ public sealed class FileScanner(Options options)
         }
     }
 
-    /// <summary>Compute the SHA-256 of a file's contents, streaming so memory stays flat on huge files.</summary>
-    public void ComputeHash(FileRecord record)
+    /// <summary>
+    /// Pass two: compute the SHA-256 of one file's contents, streaming so memory stays flat on huge
+    /// files. Files larger than <see cref="Options.MaxHashBytes"/> are intentionally left unhashed
+    /// (a result with no hash and no error), and their metadata row keeps its NULL hash.
+    /// </summary>
+    public HashResult HashFile(PendingHash pending)
     {
-        if (!_options.ComputeHash)
-            return;
-
-        if (_options.MaxHashBytes > 0 && record.SizeBytes > _options.MaxHashBytes)
-            return; // intentionally left null — metadata still recorded
+        if (_options.MaxHashBytes > 0 && pending.SizeBytes > _options.MaxHashBytes)
+            return new HashResult(pending.Id, ContentHash: null, Error: null);
 
         try
         {
             using var stream = new FileStream(
-                record.FullPath,
+                pending.FullPath,
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, // tolerate files held open by other processes
@@ -128,12 +130,13 @@ public sealed class FileScanner(Options options)
 
             using var sha = SHA256.Create();
             byte[] hash = sha.ComputeHash(stream);
-            record.ContentHash = Convert.ToHexStringLower(hash);
+            Interlocked.Increment(ref FilesHashed);
+            return new HashResult(pending.Id, Convert.ToHexStringLower(hash), Error: null);
         }
         catch (Exception ex)
         {
             Interlocked.Increment(ref HashErrors);
-            record.Error = ex.GetType().Name + ": " + ex.Message;
+            return new HashResult(pending.Id, ContentHash: null, ex.GetType().Name + ": " + ex.Message);
         }
     }
 

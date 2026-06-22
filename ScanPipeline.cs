@@ -1,12 +1,14 @@
-using System.Threading.Channels;
+using System.Collections.Concurrent;
 
 namespace HarddriveDeduper;
 
 /// <summary>
-/// Runs the scan as a producer/consumer pipeline. Each drive is scanned as its own scan run with a
-/// distinct ScanRunId: many threads enumerate and hash that drive's files into a bounded channel,
-/// while a single consumer drains the channel into SQL Server. Drives are scanned one after another.
-/// Returns a process exit code (0 = success, 130 = canceled, 1 = fatal error).
+/// Runs the scan in two passes per drive, each drive being its own scan run with a distinct
+/// ScanRunId. Pass one enumerates every file and writes its metadata (with no content hash). Pass
+/// two reads those rows back and fills in their content hashes. Committing the full metadata
+/// inventory before any hashing means an interrupted hashing pass still leaves a complete file
+/// listing behind. Drives are scanned one after another. Returns a process exit code
+/// (0 = success, 130 = canceled, 1 = fatal error).
 /// </summary>
 public sealed class ScanPipeline
 {
@@ -45,49 +47,22 @@ public sealed class ScanPipeline
         // Log this drive's run as started; it stays "Running" with no completion time until we stamp it below.
         await _writer.BeginScanAsync(root, ct);
 
-        // Give producers enough headroom to keep hashing while the consumer is mid-flush.
-        const int batchHeadroomFactor = 2;
-        var channel = Channel.CreateBounded<FileRecord>(new BoundedChannelOptions(_options.BatchSize * batchHeadroomFactor)
-        {
-            SingleReader = true,
-            SingleWriter = false,
-            FullMode = BoundedChannelFullMode.Wait,
-        });
-
-        // Single consumer: write each record to SQL as it arrives.
-        Task consumer = Task.Run(async () =>
-        {
-            await foreach (FileRecord rec in channel.Reader.ReadAllAsync(ct))
-                await _writer.AddAsync(rec, ct);
-        });
-
         try
         {
-            // Hash on N threads when hashing is on; otherwise a single producer is enough.
-            var parallelOpts = new ParallelOptions
-            {
-                MaxDegreeOfParallelism = _options.ComputeHash ? _options.Parallelism : 1,
-                CancellationToken = ct,
-            };
+            // Pass one: enumerate and persist metadata for every file.
+            await EnumerateMetadataAsync(root, ct);
 
-            await Parallel.ForEachAsync(_scanner.EnumerateFiles(root), parallelOpts, async (record, token) =>
-            {
-                _scanner.ComputeHash(record);
-                await channel.Writer.WriteAsync(record, token);
-            });
+            // Pass two: read the rows back and fill in their content hashes.
+            if (_options.ComputeHash)
+                await ComputeHashesAsync(ct);
 
-            channel.Writer.Complete();
-            await consumer;
-            await _writer.FlushAsync(CancellationToken.None);
             await _writer.WriteSkipsAsync(DrainSkips(), CancellationToken.None);
             await _writer.CompleteScanAsync("Completed", null, CancellationToken.None);
             return 0;
         }
         catch (OperationCanceledException)
         {
-            // Drain and flush whatever was already buffered before exiting.
-            channel.Writer.TryComplete();
-            try { await consumer; } catch { /* ignore */ }
+            // Flush whatever metadata was already buffered before exiting.
             try { await _writer.FlushAsync(CancellationToken.None); } catch { /* ignore */ }
             try { await _writer.WriteSkipsAsync(DrainSkips(), CancellationToken.None); } catch { /* ignore */ }
             // Record the partial run as canceled; its rows must not be treated as a complete inventory.
@@ -96,10 +71,65 @@ public sealed class ScanPipeline
         }
         catch (Exception ex)
         {
-            channel.Writer.TryComplete(ex);
             _reporter.ReportFatalError(ex.Message);
+            try { await _writer.FlushAsync(CancellationToken.None); } catch { /* ignore */ }
             try { await _writer.CompleteScanAsync("Failed", ex.Message, CancellationToken.None); } catch { /* ignore */ }
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Pass one: walk the tree and bulk-insert each file's metadata. Enumeration is single-threaded
+    /// (it's directory I/O, not CPU work) and <see cref="DatabaseWriter.AddAsync"/> flushes in batches.
+    /// </summary>
+    private async Task EnumerateMetadataAsync(string root, CancellationToken ct)
+    {
+        foreach (FileRecord record in _scanner.EnumerateFiles(root))
+        {
+            ct.ThrowIfCancellationRequested();
+            await _writer.AddAsync(record, ct);
+        }
+
+        await _writer.FlushAsync(ct);
+    }
+
+    /// <summary>
+    /// Pass two: page through this run's rows (by Id) and hash each file on N threads, writing the
+    /// results back in batches. Each chunk is read fully, hashed, then updated before the next chunk
+    /// is read, so reads and updates never contend on the connection and memory stays bounded.
+    /// </summary>
+    private async Task ComputeHashesAsync(CancellationToken ct)
+    {
+        await _writer.BeginHashPassAsync(ct);
+
+        var parallelOpts = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = _options.Parallelism,
+            CancellationToken = ct,
+        };
+
+        long afterId = 0;
+        while (true)
+        {
+            IReadOnlyList<PendingHash> chunk = await _writer.ReadNextHashChunkAsync(afterId, ct);
+            if (chunk.Count == 0)
+                break;
+
+            // Rows come back ordered by Id, so the last one is this chunk's high-water mark.
+            afterId = chunk[^1].Id;
+
+            // Hash the chunk in parallel; keep only rows that actually got a hash or hit an error
+            // (files skipped for exceeding the size limit are left with their NULL hash).
+            var updates = new ConcurrentQueue<HashResult>();
+            await Parallel.ForEachAsync(chunk, parallelOpts, (pending, _) =>
+            {
+                HashResult result = _scanner.HashFile(pending);
+                if (result.ContentHash is not null || result.Error is not null)
+                    updates.Enqueue(result);
+                return ValueTask.CompletedTask;
+            });
+
+            await _writer.UpdateHashesAsync(updates, ct);
         }
     }
 

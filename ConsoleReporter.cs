@@ -26,8 +26,11 @@ public sealed class ConsoleReporter
     public IAsyncDisposable StartProgress(FileScanner scanner, DatabaseWriter writer) =>
         new Timer(_ =>
         {
+            // Pass one drives "files"/"written"; pass two drives "hashed". Both are shown so the
+            // shift from enumeration to hashing is visible on a single line.
             Console.Write($"\r  files: {scanner.FilesSeen:N0}  written: {writer.RowsWritten:N0}  " +
-                          $"dirs skipped: {scanner.DirectoriesSkipped:N0}  hash errors: {scanner.HashErrors:N0}   ");
+                          $"hashed: {scanner.FilesHashed:N0}  dirs skipped: {scanner.DirectoriesSkipped:N0}  " +
+                          $"hash errors: {scanner.HashErrors:N0}   ");
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
     /// <summary>Print the final tally once the scan has finished (or been canceled).</summary>
@@ -38,6 +41,7 @@ public sealed class ConsoleReporter
         Console.WriteLine("Done.");
         Console.WriteLine($"  Files seen:       {scanner.FilesSeen:N0}");
         Console.WriteLine($"  Rows written:     {writer.RowsWritten:N0}");
+        Console.WriteLine($"  Files hashed:     {scanner.FilesHashed:N0}");
         string skipNote = scanner.DirectoriesSkipped > 0 ? $"  (logged to {_options.SkipTableName})" : "";
         Console.WriteLine($"  Directories skipped (access): {scanner.DirectoriesSkipped:N0}{skipNote}");
         Console.WriteLine($"  Hash errors:      {scanner.HashErrors:N0}");

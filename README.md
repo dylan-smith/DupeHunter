@@ -105,6 +105,10 @@ ORDER BY SUM(SizeBytes) DESC;
 
 ## Notes
 
+- Each drive is scanned in two passes. Pass one enumerates every file and writes its metadata
+  (name, path, size, dates) with a NULL hash; pass two reads those rows back and fills in the
+  content hashes. Committing the full inventory before hashing means an interrupted hashing pass
+  still leaves a complete file listing behind. `--no-hash` runs pass one only.
 - Hashing streams the file (1 MB buffer) so memory stays flat even on very large files.
 - Files open in other processes are read with shared access where possible; unreadable files are
   still recorded with their metadata and a populated `ScanError`.

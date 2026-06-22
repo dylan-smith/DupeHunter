@@ -1,6 +1,9 @@
 namespace HarddriveDeduper;
 
-/// <summary>A single file's metadata plus a content fingerprint, destined for the database.</summary>
+/// <summary>
+/// A single file's metadata, captured during pass one and inserted with no content hash.
+/// Hashes are computed and filled in separately during pass two.
+/// </summary>
 public sealed class FileRecord
 {
     public required string FileName { get; init; }
@@ -8,10 +11,14 @@ public sealed class FileRecord
     public required long SizeBytes { get; init; }
     public required DateTime DateModifiedUtc { get; init; }
     public required DateTime DateCreatedUtc { get; init; }
-
-    /// <summary>SHA-256 of the file contents, lower-case hex. Null when hashing was skipped or failed.</summary>
-    public string? ContentHash { get; set; }
-
-    /// <summary>Populated when the file could not be read/hashed; otherwise null.</summary>
-    public string? Error { get; set; }
 }
+
+/// <summary>
+/// A row that pass two needs to hash: the table identity plus the location and size needed to
+/// re-open the file and decide whether it's within the hashing size limit. Read back from the
+/// database after pass one has committed the metadata.
+/// </summary>
+public readonly record struct PendingHash(long Id, string FullPath, long SizeBytes);
+
+/// <summary>The outcome of hashing one file in pass two, keyed back to its table row by <see cref="Id"/>.</summary>
+public readonly record struct HashResult(long Id, string? ContentHash, string? Error);

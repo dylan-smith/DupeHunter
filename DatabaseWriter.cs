@@ -9,6 +9,17 @@ namespace HarddriveDeduper;
 /// </summary>
 public sealed class DatabaseWriter : IDisposable
 {
+    /// <summary>Max length of the <c>FileName</c> column; longer names are truncated before insert.</summary>
+    private const int FileNameMaxLength = 260;
+
+    /// <summary>Creates the target database (named in the connection string) if it doesn't exist.</summary>
+    private const string CreateDatabaseIfMissingSql = @"
+IF DB_ID(@db) IS NULL
+BEGIN
+    DECLARE @sql NVARCHAR(MAX) = N'CREATE DATABASE ' + QUOTENAME(@db);
+    EXEC sp_executesql @sql;
+END";
+
     private readonly Options _options;
     private readonly SqlConnection _connection;
     private readonly DataTable _buffer;
@@ -30,7 +41,7 @@ public sealed class DatabaseWriter : IDisposable
         await _connection.OpenAsync(ct);
 
         if (_options.Recreate)
-            await ExecuteAsync($"IF OBJECT_ID('{_options.TableName}', 'U') IS NOT NULL DROP TABLE {_options.TableName};", ct);
+            await ExecuteAsync(DropTableSql(), ct);
 
         await ExecuteAsync(CreateTableSql(), ct);
     }
@@ -39,7 +50,7 @@ public sealed class DatabaseWriter : IDisposable
     public async Task AddAsync(FileRecord r, CancellationToken ct)
     {
         DataRow row = _buffer.NewRow();
-        row["FileName"] = Truncate(r.FileName, 260);
+        row["FileName"] = Truncate(r.FileName, FileNameMaxLength);
         row["FullPath"] = r.FullPath;
         row["SizeBytes"] = r.SizeBytes;
         row["DateModifiedUtc"] = r.DateModifiedUtc;
@@ -90,12 +101,15 @@ public sealed class DatabaseWriter : IDisposable
         return t;
     }
 
+    private string DropTableSql() =>
+        $"IF OBJECT_ID('{_options.TableName}', 'U') IS NOT NULL DROP TABLE {_options.TableName};";
+
     private string CreateTableSql() => $@"
 IF OBJECT_ID('{_options.TableName}', 'U') IS NULL
 BEGIN
     CREATE TABLE {_options.TableName} (
         Id              BIGINT IDENTITY(1,1) PRIMARY KEY,
-        FileName        NVARCHAR(260)  NOT NULL,
+        FileName        NVARCHAR({FileNameMaxLength})  NOT NULL,
         FullPath        NVARCHAR(MAX)  NOT NULL,
         SizeBytes       BIGINT         NOT NULL,
         DateModifiedUtc DATETIME2(3)   NOT NULL,
@@ -121,12 +135,7 @@ END";
         await using var master = new SqlConnection(builder.ConnectionString);
         await master.OpenAsync(ct);
         await using var cmd = master.CreateCommand();
-        cmd.CommandText = @"
-IF DB_ID(@db) IS NULL
-BEGIN
-    DECLARE @sql NVARCHAR(MAX) = N'CREATE DATABASE ' + QUOTENAME(@db);
-    EXEC sp_executesql @sql;
-END";
+        cmd.CommandText = CreateDatabaseIfMissingSql;
         cmd.Parameters.AddWithValue("@db", dbName);
         await cmd.ExecuteNonQueryAsync(ct);
     }

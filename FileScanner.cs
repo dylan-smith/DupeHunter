@@ -6,15 +6,16 @@ namespace HarddriveDeduper;
 /// Walks a directory tree manually (so a single inaccessible folder doesn't abort the whole
 /// enumeration) and produces a <see cref="FileRecord"/> per file, optionally hashing contents.
 /// </summary>
-public sealed class FileScanner
+public sealed class FileScanner(Options options)
 {
-    private readonly Options _options;
+    /// <summary>Read buffer used while streaming a file through the hash function.</summary>
+    private const int HashBufferBytes = 1 << 20; // 1 MB
+
+    private readonly Options _options = options;
 
     public long FilesSeen;
     public long DirectoriesSkipped;
     public long HashErrors;
-
-    public FileScanner(Options options) => _options = options;
 
     /// <summary>Lazily enumerate file metadata under <paramref name="root"/>. Hashing happens later.</summary>
     public IEnumerable<FileRecord> EnumerateFiles(string root)
@@ -111,7 +112,7 @@ public sealed class FileScanner
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, // tolerate files held open by other processes
-                bufferSize: 1 << 20,
+                bufferSize: HashBufferBytes,
                 FileOptions.SequentialScan);
 
             using var sha = SHA256.Create();

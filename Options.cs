@@ -55,6 +55,26 @@ public sealed partial class Options
     public int TopN { get; set; } = 10;
 
     /// <summary>
+    /// As part of analysis, write a YAML report listing <em>every</em> duplicate file and folder set
+    /// whose wasted space reaches <see cref="YamlThresholdBytes"/> (not just the top N shown on the
+    /// console), with all of its locations. On by default; disable with <c>--no-yaml</c>.
+    /// </summary>
+    public bool WriteYaml { get; set; } = true;
+
+    /// <summary>
+    /// Path of the YAML duplicate report written during analysis. When null (the default) the file is
+    /// auto-named <c>duplicates-{yyyyMMdd-HHmmss}.yml</c> with the run's UTC timestamp, so repeated runs
+    /// don't overwrite one another. Set an exact path with <c>--yaml-out</c>.
+    /// </summary>
+    public string? YamlOutputPath { get; set; }
+
+    /// <summary>
+    /// Minimum reclaimable (wasted) space a duplicate set must have to be included in the YAML report.
+    /// Default 100 MB.
+    /// </summary>
+    public long YamlThresholdBytes { get; set; } = 100L * 1024 * 1024;
+
+    /// <summary>
     /// Prune the database instead of scanning: keep only the most recent completed scan of each drive
     /// and delete every other scan's file/skip rows. Assumes no scan is currently running.
     /// </summary>
@@ -158,6 +178,18 @@ public sealed partial class Options
 
                 case "--top":
                     o.TopN = Math.Max(1, int.Parse(Next(arg)));
+                    break;
+
+                case "--no-yaml":
+                    o.WriteYaml = false;
+                    break;
+
+                case "--yaml-out":
+                    o.YamlOutputPath = Next(arg);
+                    break;
+
+                case "--yaml-threshold-mb":
+                    o.YamlThresholdBytes = Math.Max(0, long.Parse(Next(arg))) * 1024L * 1024L;
                     break;
 
                 case "--cleanup":

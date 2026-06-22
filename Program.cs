@@ -39,6 +39,7 @@ if (options.Analyze)
         DuplicateAnalysis analysis =
             await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
         analysisReporter.PrintDuplicates(analysis, options.TopN);
+        await WriteYamlReportAsync(analyzer, cts.Token);
         await MaybeCleanupAfterAnalysisAsync(cts.Token);
         return 0;
     }
@@ -124,6 +125,7 @@ if (exitCode == 0 && options.ComputeHash && !options.NoAnalyze)
         DuplicateAnalysis analysis =
             await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
         reporter.PrintDuplicates(analysis, options.TopN);
+        await WriteYamlReportAsync(analyzer, cts.Token);
         await MaybeCleanupAfterAnalysisAsync(cts.Token);
     }
     catch (OperationCanceledException) { /* user canceled; summary already printed */ }
@@ -166,6 +168,41 @@ async Task RunCleanupAsync(CancellationToken ct)
     CleanupResult result = await cleaner.ExecuteAsync(plan, progress, ct);
     Console.WriteLine();
     Console.WriteLine($"Deleted {result.FilesDeleted:n0} file row(s) and {result.SkipsDeleted:n0} skip row(s).");
+}
+
+// Write the YAML duplicate report (every file/folder set wasting at least the threshold, with all of
+// their locations) unless --no-yaml was given. Re-queries uncapped rather than reusing the top-N
+// console results, which are both limited and sampled. Non-fatal: a write failure warns and carries on.
+async Task WriteYamlReportAsync(DuplicateAnalyzer analyzer, CancellationToken ct)
+{
+    if (!options.WriteYaml)
+        return;
+
+    try
+    {
+        // Stamp the filename and the report's generatedUtc with one timestamp so they agree. The default
+        // name carries the timestamp so successive runs each write a fresh file instead of clobbering.
+        DateTime generatedUtc = DateTime.UtcNow;
+        string outputPath = options.YamlOutputPath
+            ?? $"duplicates-{generatedUtc:yyyyMMdd-HHmmss}.yml";
+
+        DuplicateAnalysis report =
+            await analyzer.FindDuplicatesOverThresholdAsync(options.YamlThresholdBytes, ct);
+        await DuplicateYamlWriter.WriteAsync(
+            outputPath, report, options.YamlThresholdBytes, generatedUtc, ct);
+
+        double thresholdMb = options.YamlThresholdBytes / (1024.0 * 1024.0);
+        Console.WriteLine();
+        Console.WriteLine(
+            $"Wrote {report.Groups.Count} file set(s) and {report.FolderGroups.Count} folder set(s) " +
+            $"wasting ≥ {thresholdMb:0.##} MB to {Path.GetFullPath(outputPath)}");
+    }
+    catch (OperationCanceledException) { /* user canceled; nothing partial to report */ }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("Analysis succeeded, but writing the YAML report failed:");
+        Console.Error.WriteLine("  " + ex.Message);
+    }
 }
 
 // Run cleanup after a successful analysis unless suppressed. A cleanup failure here is non-fatal: the

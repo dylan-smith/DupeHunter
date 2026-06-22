@@ -88,13 +88,43 @@ public sealed class DuplicateAnalyzer
 
         var runIds = scans.Select(s => s.ScanRunId).ToList();
         long totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
-        List<DuplicateGroup> groups = await QueryTopFileGroupsAsync(conn, runIds, topN, ct);
-        List<DuplicateGroup> folderGroups = await QueryTopFolderGroupsAsync(conn, runIds, topN, ct);
+        List<DuplicateGroup> groups = await QueryFileGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
+        List<DuplicateGroup> folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
 
         foreach (DuplicateGroup g in groups)
             await LoadFileSamplePathsAsync(conn, runIds, g, samplePathsPerGroup, ct);
         foreach (DuplicateGroup g in folderGroups)
             await LoadFolderSamplePathsAsync(conn, runIds, g, samplePathsPerGroup, ct);
+
+        return new DuplicateAnalysis(scans, totalWasted, groups, folderGroups);
+    }
+
+    /// <summary>
+    /// Find <em>every</em> duplicate file and folder set whose reclaimable (wasted) space is at least
+    /// <paramref name="minWastedBytes"/>, across the latest completed scan of each drive (filtered by
+    /// <c>--drives</c> when given). Unlike <see cref="FindTopDuplicatesAsync"/> this is uncapped and
+    /// loads <em>all</em> of each set's locations, so the result is a complete, directly-actionable
+    /// report rather than a console preview. Returns an empty analysis when no completed scans exist.
+    /// </summary>
+    public async Task<DuplicateAnalysis> FindDuplicatesOverThresholdAsync(long minWastedBytes, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(_options.ConnectionString);
+        await conn.OpenAsync(ct);
+
+        List<ScanRef> scans = await GetLatestCompletedScansAsync(conn, ct);
+        if (scans.Count == 0)
+            return new DuplicateAnalysis(scans, 0, Array.Empty<DuplicateGroup>(), Array.Empty<DuplicateGroup>());
+
+        var runIds = scans.Select(s => s.ScanRunId).ToList();
+        long totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
+        List<DuplicateGroup> groups = await QueryFileGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
+        List<DuplicateGroup> folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
+
+        // Load every location (limit 0 = unlimited) so the report lists all copies, not a sample.
+        foreach (DuplicateGroup g in groups)
+            await LoadFileSamplePathsAsync(conn, runIds, g, limit: 0, ct);
+        foreach (DuplicateGroup g in folderGroups)
+            await LoadFolderSamplePathsAsync(conn, runIds, g, limit: 0, ct);
 
         return new DuplicateAnalysis(scans, totalWasted, groups, folderGroups);
     }
@@ -168,13 +198,18 @@ FROM (
         return result is long total ? total : Convert.ToInt64(result);
     }
 
-    private async Task<List<DuplicateGroup>> QueryTopFileGroupsAsync(
-        SqlConnection conn, IReadOnlyList<string> runIds, int topN, CancellationToken ct)
+    /// <summary>
+    /// Duplicate <em>file</em> sets ranked by wasted space. <paramref name="topN"/> caps the result
+    /// (null = uncapped) and <paramref name="minWastedBytes"/> filters out sets reclaiming less than
+    /// that (0 = no floor).
+    /// </summary>
+    private async Task<List<DuplicateGroup>> QueryFileGroupsAsync(
+        SqlConnection conn, IReadOnlyList<string> runIds, int? topN, long minWastedBytes, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         string inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
-SELECT TOP (@topN)
+SELECT {TopClause(cmd, topN)}
     ContentHash,
     SizeBytes,
     COUNT(*)                                  AS CopyCount,
@@ -184,10 +219,10 @@ SELECT TOP (@topN)
 FROM {_options.TableName}
 WHERE ScanRunId IN ({inClause}) AND ContentHash IS NOT NULL AND EntryType = 'F'
 GROUP BY ContentHash, SizeBytes
-HAVING COUNT(*) > 1
+HAVING COUNT(*) > 1 AND CAST(COUNT(*) - 1 AS BIGINT) * SizeBytes >= @minWasted
 ORDER BY WastedBytes DESC;";
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue("@topN", topN);
+        cmd.Parameters.AddWithValue("@minWasted", minWastedBytes);
 
         return await ReadGroupsAsync(cmd, ct);
     }
@@ -198,15 +233,17 @@ ORDER BY WastedBytes DESC;";
     /// the topmost is kept), then sets with fewer than two remaining copies are discarded. This stops a
     /// folder being reported as a duplicate of its own ancestor/descendant — e.g. a folder whose only
     /// child is a subfolder with the same content — which can't be deleted to reclaim space.
+    /// <paramref name="topN"/> caps the result (null = uncapped) and <paramref name="minWastedBytes"/>
+    /// filters out sets reclaiming less than that (0 = no floor).
     /// </summary>
-    private async Task<List<DuplicateGroup>> QueryTopFolderGroupsAsync(
-        SqlConnection conn, IReadOnlyList<string> runIds, int topN, CancellationToken ct)
+    private async Task<List<DuplicateGroup>> QueryFolderGroupsAsync(
+        SqlConnection conn, IReadOnlyList<string> runIds, int? topN, long minWastedBytes, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         string inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
 {IndependentFoldersCte(inClause)}
-SELECT TOP (@topN)
+SELECT {TopClause(cmd, topN)}
     ContentHash,
     SizeBytes,
     COUNT(*)                                  AS CopyCount,
@@ -215,12 +252,24 @@ SELECT TOP (@topN)
     COUNT(DISTINCT FileName)                  AS DistinctNameCount
 FROM Independent
 GROUP BY ContentHash, SizeBytes
-HAVING COUNT(*) > 1
+HAVING COUNT(*) > 1 AND CAST(COUNT(*) - 1 AS BIGINT) * SizeBytes >= @minWasted
 ORDER BY WastedBytes DESC;";
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue("@topN", topN);
+        cmd.Parameters.AddWithValue("@minWasted", minWastedBytes);
 
         return await ReadGroupsAsync(cmd, ct);
+    }
+
+    /// <summary>
+    /// The <c>TOP (@topN) </c> fragment for a ranked query, adding the parameter when capped; an empty
+    /// string (no cap) when <paramref name="topN"/> is null.
+    /// </summary>
+    private static string TopClause(SqlCommand cmd, int? topN)
+    {
+        if (topN is null)
+            return "";
+        cmd.Parameters.AddWithValue("@topN", topN.Value);
+        return "TOP (@topN) ";
     }
 
     private static async Task<List<DuplicateGroup>> ReadGroupsAsync(SqlCommand cmd, CancellationToken ct)
@@ -242,25 +291,28 @@ ORDER BY WastedBytes DESC;";
         return groups;
     }
 
+    /// <summary>Locations for a duplicate file set. <paramref name="limit"/> ≤ 0 loads them all.</summary>
     private async Task LoadFileSamplePathsAsync(
         SqlConnection conn, IReadOnlyList<string> runIds, DuplicateGroup g, int limit, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         string inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
-SELECT TOP (@limit) FullPath
+SELECT {LimitClause(cmd, limit)}FullPath
 FROM {_options.TableName}
 WHERE ScanRunId IN ({inClause}) AND ContentHash = @hash AND SizeBytes = @size AND EntryType = 'F'
 ORDER BY FullPath;";
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue("@limit", limit);
         cmd.Parameters.AddWithValue("@hash", g.ContentHash);
         cmd.Parameters.AddWithValue("@size", g.SizeBytes);
 
         await ReadSamplePathsAsync(cmd, g, ct);
     }
 
-    /// <summary>Sample locations for a duplicate folder set, listing only the pruned (topmost) copies.</summary>
+    /// <summary>
+    /// Locations for a duplicate folder set, listing only the pruned (topmost) copies.
+    /// <paramref name="limit"/> ≤ 0 loads them all.
+    /// </summary>
     private async Task LoadFolderSamplePathsAsync(
         SqlConnection conn, IReadOnlyList<string> runIds, DuplicateGroup g, int limit, CancellationToken ct)
     {
@@ -268,16 +320,27 @@ ORDER BY FullPath;";
         string inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
 {IndependentFoldersCte(inClause)}
-SELECT TOP (@limit) FullPath
+SELECT {LimitClause(cmd, limit)}FullPath
 FROM Independent
 WHERE ContentHash = @hash AND SizeBytes = @size
 ORDER BY FullPath;";
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue("@limit", limit);
         cmd.Parameters.AddWithValue("@hash", g.ContentHash);
         cmd.Parameters.AddWithValue("@size", g.SizeBytes);
 
         await ReadSamplePathsAsync(cmd, g, ct);
+    }
+
+    /// <summary>
+    /// The <c>TOP (@limit) </c> fragment for a path query, adding the parameter when capped; an empty
+    /// string (load all rows) when <paramref name="limit"/> is ≤ 0.
+    /// </summary>
+    private static string LimitClause(SqlCommand cmd, int limit)
+    {
+        if (limit <= 0)
+            return "";
+        cmd.Parameters.AddWithValue("@limit", limit);
+        return "TOP (@limit) ";
     }
 
     private static async Task ReadSamplePathsAsync(SqlCommand cmd, DuplicateGroup g, CancellationToken ct)

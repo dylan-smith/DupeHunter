@@ -42,6 +42,13 @@ public sealed partial class Options
         sb.AppendLine("      --no-analyze             Scan only; skip the post-scan duplicate analysis.");
         sb.AppendLine("      --top <n>                Number of duplicate sets to list. Default: 10");
         sb.AppendLine();
+        sb.AppendLine("YAML REPORT (written automatically as part of analysis):");
+        sb.AppendLine("                               Lists EVERY duplicate file and folder set wasting at least");
+        sb.AppendLine("                               the threshold (not just the top N), with all locations.");
+        sb.AppendLine("      --yaml-out <path>        Output file. Default: duplicates-<UTC timestamp>.yml");
+        sb.AppendLine("      --yaml-threshold-mb <n>  Min wasted space (MB) for a set to be included. Default: 100");
+        sb.AppendLine("      --no-yaml                Skip writing the YAML report.");
+        sb.AppendLine();
         sb.AppendLine("CLEANUP (prune the database; does NOT scan):");
         sb.AppendLine("      --cleanup, --clean       Keep only the latest COMPLETED scan of each drive and");
         sb.AppendLine("                               delete every other run's file/skip rows. Considers all");

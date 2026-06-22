@@ -34,6 +34,37 @@ completed scan of each drive** and combines them, so duplicates are found across
 failed, or never finished are never analyzed, and a superseded older scan of a drive is ignored
 once a newer one completes.
 
+As part of every analysis the tool also writes a **YAML report** (auto-named
+`duplicates-<UTC timestamp>.yml` by default, so repeated runs don't overwrite each other) listing
+*every* duplicate file and folder set whose reclaimable (wasted) space reaches a threshold — **100 MB
+by default** — with *all* of each set's locations, not just the handful shown on the console. This makes
+the report directly actionable (e.g. feed it to a script that deletes the redundant copies). Tune it with
+`--yaml-threshold-mb <n>` and `--yaml-out <path>`, or skip it entirely with `--no-yaml`.
+
+The report looks like:
+
+```yaml
+generatedUtc: "2026-06-22T16:50:00Z"
+wastedSpaceThresholdBytes: 104857600
+totalWastedBytes: 5368709120
+scans:
+  - drive: "C:\\"
+    scanRunId: "a1b2c3d4-..."
+    completedUtc: "2026-06-22T10:00:00Z"
+duplicateFileSets:
+  - name: "VacationVideo.mp4"
+    namesDiffer: false
+    contentHash: "9f86d081884c7d65..."
+    sizeBytes: 1073741824
+    copyCount: 3
+    wastedBytes: 2147483648
+    locations:
+      - "C:\\Users\\me\\Videos\\VacationVideo.mp4"
+      - "D:\\Backup\\VacationVideo.mp4"
+      - "D:\\Backup2\\VacationVideo.mp4"
+duplicateFolderSets: []
+```
+
 After a successful analysis (whether post-scan or a standalone `--analyze`), the tool automatically
 runs a database **cleanup**, pruning everything but the latest completed scan of each drive (the same
 runs analysis just used). Pass `--no-cleanup` to skip it. The `dbo.Scans` audit log is always

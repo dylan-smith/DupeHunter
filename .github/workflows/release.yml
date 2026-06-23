@@ -1,0 +1,70 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    env:
+      RID: win-x64
+      EXE_NAME: dupehunter.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore HarddriveDeduper.csproj
+
+      - name: Format check
+        run: dotnet format HarddriveDeduper.csproj --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build HarddriveDeduper.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --no-build
+
+      - name: Publish single-file self-contained executable
+        run: >
+          dotnet publish HarddriveDeduper.csproj
+          --configuration Release
+          --runtime ${{ env.RID }}
+          --self-contained true
+          --output publish
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:AssemblyName=dupehunter
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fileindexer-${{ env.RID }}
+          path: publish/${{ env.EXE_NAME }}
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create "v${{ github.run_number }}"
+          "publish/${{ env.EXE_NAME }}"
+          --title "Build ${{ github.run_number }}"
+          --notes "Automated release from commit ${{ github.sha }}."
+          --target "${{ github.sha }}"

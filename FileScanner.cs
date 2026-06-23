@@ -7,7 +7,7 @@ namespace DupeHunter;
 /// Walks a directory tree manually (so a single inaccessible folder doesn't abort the whole
 /// enumeration) and produces a <see cref="FileRecord"/> per file, optionally hashing contents.
 /// </summary>
-public sealed class FileScanner(Options options)
+internal sealed class FileScanner(Options options)
 {
     /// <summary>Read buffer used while streaming a file through the hash function.</summary>
     private const int HashBufferBytes = 1 << 20; // 1 MB

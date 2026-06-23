@@ -1,9 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Data.Sqlite;
 
 namespace DupeHunter;
 
 /// <summary>Parsed command-line options. Help text lives in <c>Options.HelpText.cs</c>.</summary>
-public sealed partial class Options
+internal sealed partial class Options
 {
     /// <summary>Drive roots to scan, e.g. "C:\", "D:\". Empty means "all fixed drives".</summary>
     public List<string> Drives { get; } = [];
@@ -97,6 +98,10 @@ public sealed partial class Options
 
     public bool ShowHelp { get; set; }
 
+    [SuppressMessage("Maintainability", "CA1502:Avoid excessive complexity",
+        Justification = "A flat switch with one case per command-line flag is the clearest form for an argument parser; splitting it would obscure rather than clarify.")]
+    [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase",
+        Justification = "Option tokens are matched against lowercase ASCII flag names; lowercasing (not uppercasing) is what makes the comparison correct here.")]
     public static Options Parse(string[] args)
     {
         var o = new Options();

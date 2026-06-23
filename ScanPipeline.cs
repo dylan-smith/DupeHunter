@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 namespace DupeHunter;
 
 /// <summary>Aggregated counters across every drive scanned this process, for the final summary.</summary>
-public sealed record ScanTotals(
+internal sealed record ScanTotals(
     long FilesSeen,
     long RowsWritten,
     long FilesHashed,
@@ -20,7 +20,7 @@ public sealed record ScanTotals(
 /// connection) per drive, so they stay fully isolated — and each drive shows its own live progress.
 /// Returns a process exit code (0 = success, 130 = canceled, 1 = fatal error).
 /// </summary>
-public sealed class ScanPipeline
+internal sealed class ScanPipeline
 {
     private readonly Options _options;
     private readonly ConsoleReporter _reporter;

@@ -10,7 +10,7 @@ namespace DupeHunter;
 /// hand — there is no YAML dependency — so every string is double-quoted and escaped, which lets
 /// Windows paths (backslashes) and awkward file names survive a round-trip.
 /// </summary>
-public static class DuplicateYamlWriter
+internal static class DuplicateYamlWriter
 {
     /// <summary>
     /// Serialize <paramref name="analysis"/> to <paramref name="path"/>. <paramref name="thresholdBytes"/>

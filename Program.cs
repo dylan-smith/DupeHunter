@@ -173,7 +173,7 @@ async Task RunCleanupAsync(CancellationToken ct)
     }
 
     var progress = new Progress<long>(n => Console.Write($"\rDeleting... {n:n0} rows removed"));
-    var result = await cleaner.ExecuteAsync(plan, progress, ct);
+    var result = await cleaner.ExecuteAsync(progress, ct);
     Console.WriteLine();
     Console.WriteLine($"Deleted {result.FilesDeleted:n0} file row(s) and {result.SkipsDeleted:n0} skip row(s).");
 }

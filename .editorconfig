@@ -247,7 +247,10 @@ dotnet_diagnostic.CA1028.severity = warning
 dotnet_diagnostic.CA1030.severity = warning
 
 # CA1031: Do not catch general exception types
-dotnet_diagnostic.CA1031.severity = warning
+# Disabled by design: this is a resilient drive scanner and CLI. Per-file hashing, directory probing,
+# per-drive scan tasks, and the top-level command handlers all deliberately catch Exception so one bad
+# file/drive is recorded and skipped (or reported as a clean exit code) rather than aborting the run.
+dotnet_diagnostic.CA1031.severity = none
 
 # CA1033: Interface methods should be callable by child types
 dotnet_diagnostic.CA1033.severity = warning
@@ -493,7 +496,10 @@ dotnet_diagnostic.CA2009.severity = warning
 dotnet_diagnostic.CA2011.severity = warning
 
 # CA2100: Review SQL queries for security vulnerabilities
-dotnet_diagnostic.CA2100.severity = warning
+# Disabled by design: every user/data value is passed as a parameter (@id, @hash, ...). The only
+# interpolated parts are table identifiers from Options (e.g. --table), which SQL cannot parameterize
+# and which are operator-supplied configuration, not untrusted input.
+dotnet_diagnostic.CA2100.severity = none
 
 # CA2101: Specify marshaling for P/Invoke string arguments
 dotnet_diagnostic.CA2101.severity = warning

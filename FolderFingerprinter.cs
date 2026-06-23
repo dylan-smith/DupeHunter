@@ -20,7 +20,7 @@ namespace DupeHunter;
 /// equal to another unless every file beneath it was actually hashed. Memory scales with the number of
 /// folders (a small incremental hasher and a few counters each), not with the number of files.
 /// </remarks>
-public sealed class FolderFingerprinter
+internal sealed class FolderFingerprinter
 {
     /// <summary>Running state for one folder while files are folded in; finalized by <see cref="Finish"/>.</summary>
     private sealed class Accumulator

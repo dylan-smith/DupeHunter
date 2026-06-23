@@ -9,7 +9,7 @@ namespace DupeHunter;
 /// SQLite file, so every write is serialized through a process-wide lock (<see cref="_writeLock"/>) to
 /// keep concurrent writers from colliding. Reads run lock-free against WAL snapshots.
 /// </summary>
-public sealed class DatabaseWriter : IDisposable
+internal sealed class DatabaseWriter : IDisposable
 {
     /// <summary>Max length of the <c>FileName</c> column; longer names are truncated before insert.</summary>
     private const int FileNameMaxLength = 260;
@@ -151,7 +151,7 @@ WHERE ScanRunId = @id;";
             return;
         }
 
-        var table = new DataTable();
+        using var table = new DataTable();
         table.Columns.Add("FullPath", typeof(string));
         table.Columns.Add("Reason", typeof(string));
         table.Columns.Add("ScanRunId", typeof(string));
@@ -325,7 +325,7 @@ ORDER BY ContentHash;";
             return;
         }
 
-        var table = new DataTable();
+        using var table = new DataTable();
         foreach (DataColumn col in _buffer.Columns)
         {
             table.Columns.Add(col.ColumnName, col.DataType);
@@ -482,5 +482,9 @@ CREATE INDEX IF NOT EXISTS IX_Scans_Drive ON {_options.ScanTableName} (Drive, St
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
-    public void Dispose() => _connection.Dispose();
+    public void Dispose()
+    {
+        _buffer.Dispose();
+        _connection.Dispose();
+    }
 }

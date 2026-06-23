@@ -14,7 +14,7 @@ namespace DupeHunter;
 /// is redirected (a file or pipe), the block is written once on disposal with its final values instead,
 /// so logs stay readable rather than filling with escape codes.
 /// </remarks>
-public sealed class MultiProgress : IAsyncDisposable
+internal sealed class MultiProgress : IAsyncDisposable
 {
     /// <summary>One drive's block: a header line and a live line per pass, fed by the scanning task.</summary>
     public sealed class Slot
@@ -148,23 +148,26 @@ public sealed class MultiProgress : IAsyncDisposable
         const int StdOutputHandle = -11;
         const uint EnableVirtualTerminalProcessing = 0x0004;
 
-        var handle = GetStdHandle(StdOutputHandle);
-        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
-        {
-            return false;
-        }
-
-        return !GetConsoleMode(handle, out var mode)
-            ? false
-            : (mode & EnableVirtualTerminalProcessing) != 0 || SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing);
+        var handle = NativeMethods.GetStdHandle(StdOutputHandle);
+        return handle != IntPtr.Zero
+            && handle != new IntPtr(-1)
+            && NativeMethods.GetConsoleMode(handle, out var mode)
+            && ((mode & EnableVirtualTerminalProcessing) != 0 || NativeMethods.SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing));
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern nint GetStdHandle(int nStdHandle);
+    /// <summary>The kernel32 console P/Invokes used to enable ANSI escape handling on Windows.</summary>
+    private static class NativeMethods
+    {
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        internal static extern nint GetStdHandle(int nStdHandle);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetConsoleMode(nint hConsoleHandle, out uint lpMode);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        internal static extern bool GetConsoleMode(nint hConsoleHandle, out uint lpMode);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetConsoleMode(nint hConsoleHandle, uint dwMode);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        internal static extern bool SetConsoleMode(nint hConsoleHandle, uint dwMode);
+    }
 }

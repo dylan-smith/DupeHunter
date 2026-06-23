@@ -6,13 +6,13 @@ namespace DupeHunter;
 /// What a cleanup will remove. The retained runs are the most recent <em>completed</em> scan of each
 /// drive (exactly the set <see cref="DuplicateAnalyzer"/> would analyze); everything else is droppable.
 /// </summary>
-public sealed record CleanupPlan(
+internal sealed record CleanupPlan(
     IReadOnlyList<ScanRef> KeptScans,
     long FilesToDelete,
     long SkipsToDelete);
 
 /// <summary>What a cleanup actually removed.</summary>
-public sealed record CleanupResult(long FilesDeleted, long SkipsDeleted);
+internal sealed record CleanupResult(long FilesDeleted, long SkipsDeleted);
 
 /// <summary>
 /// Trims the file inventory down to the data worth keeping, so the database doesn't grow without bound
@@ -27,7 +27,7 @@ public sealed record CleanupResult(long FilesDeleted, long SkipsDeleted);
 /// (completed or otherwise). It considers every drive in the log regardless of <c>--drives</c>, so it
 /// never deletes a drive's retained run just because that drive wasn't named on the command line.
 /// </remarks>
-public sealed class DatabaseCleaner
+internal sealed class DatabaseCleaner
 {
     private readonly Options _options;
 
@@ -68,11 +68,12 @@ public sealed class DatabaseCleaner
     }
 
     /// <summary>
-    /// Carry out the deletions described by <paramref name="plan"/>. Rows are removed in batches (of
+    /// Carry out the deletions for the current retain set (the same one <see cref="PlanAsync"/> reports):
+    /// every file/skip row not belonging to a retained run. Rows are removed in batches (of
     /// <see cref="Options.BatchSize"/>) so a large purge doesn't balloon the transaction log or hold one
     /// long lock; <paramref name="progress"/> receives the running deleted-row total after each batch.
     /// </summary>
-    public async Task<CleanupResult> ExecuteAsync(CleanupPlan plan, IProgress<long>? progress, CancellationToken ct)
+    public async Task<CleanupResult> ExecuteAsync(IProgress<long>? progress, CancellationToken ct)
     {
         await using var conn = await Database.OpenConnectionAsync(_options, ct);
 

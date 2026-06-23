@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 namespace DupeHunter;
 
 /// <summary>A set of identical files — same content hash and size — found at two or more locations.</summary>
-public sealed class DuplicateGroup
+internal sealed class DuplicateGroup
 {
     public required string ContentHash { get; init; }
     public required long SizeBytes { get; init; }
@@ -25,7 +25,7 @@ public sealed class DuplicateGroup
 }
 
 /// <summary>One drive's scan run that fed an analysis: its drive root, scan id and completion time.</summary>
-public sealed record ScanRef(string Drive, string ScanRunId, DateTime CompletedAtUtc);
+internal sealed record ScanRef(string Drive, string ScanRunId, DateTime CompletedAtUtc);
 
 /// <summary>
 /// The outcome of a duplicate analysis: the duplicate sets plus the per-drive scan runs they were
@@ -43,7 +43,7 @@ public sealed record ScanRef(string Drive, string ScanRunId, DateTime CompletedA
 /// (the same redundant files, viewed at folder granularity); they let a whole redundant tree be reclaimed
 /// at once rather than file by file.
 /// </param>
-public sealed record DuplicateAnalysis(
+internal sealed record DuplicateAnalysis(
     IReadOnlyList<ScanRef> Scans,
     long TotalWastedBytes,
     IReadOnlyList<DuplicateGroup> Groups,
@@ -58,7 +58,7 @@ public sealed record DuplicateAnalysis(
 /// data from a scan that never finished is never analyzed. Files are considered identical when their
 /// content hash and size both match; rows without a hash are ignored.
 /// </summary>
-public sealed class DuplicateAnalyzer
+internal sealed class DuplicateAnalyzer
 {
     private readonly Options _options;
 

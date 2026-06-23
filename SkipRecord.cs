@@ -1,7 +1,7 @@
 namespace DupeHunter;
 
 /// <summary>A directory that could not be enumerated during a scan, and the reason why.</summary>
-public sealed class SkipRecord
+internal sealed class SkipRecord
 {
     public required string FullPath { get; init; }
 

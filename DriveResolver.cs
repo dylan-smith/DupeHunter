@@ -1,7 +1,7 @@
 namespace DupeHunter;
 
 /// <summary>Decides which drive roots a scan should walk.</summary>
-public static class DriveResolver
+internal static class DriveResolver
 {
     /// <summary>
     /// The drives named on the command line, or — when none were given — every ready fixed drive.

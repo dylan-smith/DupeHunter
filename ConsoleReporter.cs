@@ -4,7 +4,7 @@ namespace DupeHunter;
 /// All user-facing console output for a scan: the startup banner, the live (in-place) progress
 /// line, the final summary, and fatal-error reporting.
 /// </summary>
-public sealed class ConsoleReporter
+internal sealed class ConsoleReporter
 {
     private readonly Options _options;
 

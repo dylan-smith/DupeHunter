@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// What a cleanup will remove. The retained runs are the most recent <em>completed</em> scan of each

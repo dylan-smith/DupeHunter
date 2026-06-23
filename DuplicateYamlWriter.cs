@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// Writes a duplicate analysis to a YAML file: every duplicate file and folder set whose wasted space
@@ -22,7 +22,7 @@ public static class DuplicateYamlWriter
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("# Duplicate file/folder report produced by fileindexer.");
+        sb.AppendLine("# Duplicate file/folder report produced by dupehunter.");
         sb.AppendLine($"# Every set below wastes at least {FormatBytes(thresholdBytes)} ({thresholdBytes} bytes) of disk space.");
         sb.AppendLine("# 'wastedBytes' is the space reclaimable by keeping one copy and deleting the rest.");
         sb.AppendLine();

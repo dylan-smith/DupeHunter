@@ -1,4 +1,4 @@
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// A single file's metadata, captured during pass one and inserted with no content hash.

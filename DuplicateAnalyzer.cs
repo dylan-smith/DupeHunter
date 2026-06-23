@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>A set of identical files — same content hash and size — found at two or more locations.</summary>
 public sealed class DuplicateGroup

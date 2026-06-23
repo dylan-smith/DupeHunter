@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// A live, multi-line progress display for several drives scanning at once. Each drive owns a fixed

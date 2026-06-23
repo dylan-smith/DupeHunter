@@ -1,16 +1,16 @@
 using System.Text;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 public sealed partial class Options
 {
     public static string HelpText()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("fileindexer - scan drives and record every file (with a content hash) into a SQLite database file.");
+        sb.AppendLine("dupehunter - scan drives and record every file (with a content hash) into a SQLite database file.");
         sb.AppendLine();
         sb.AppendLine("USAGE:");
-        sb.AppendLine("  fileindexer [options]");
+        sb.AppendLine("  dupehunter [options]");
         sb.AppendLine();
         sb.AppendLine("OPTIONS:");
         sb.AppendLine("  -d, --drives <list>          Comma-separated drives (e.g. C,D or C:\\,E:\\).");
@@ -18,7 +18,7 @@ public sealed partial class Options
         sb.AppendLine("                               Omit to scan ALL fixed drives.");
         sb.AppendLine("                               Analyze mode: drives whose latest scans to combine.");
         sb.AppendLine("  -c, --db, --database <path>  SQLite database file. Created if it doesn't exist.");
-        sb.AppendLine("                               Default: fileindex.db (in the current directory).");
+        sb.AppendLine("                               Default: dupehunter.db (in the current directory).");
         sb.AppendLine("  -t, --table <name>           Destination table. Default: Files");
         sb.AppendLine("      --skip-table <name>      Table for skipped (inaccessible) directories.");
         sb.AppendLine("                               Default: ScanSkips");
@@ -59,14 +59,14 @@ public sealed partial class Options
         sb.AppendLine("      --dry-run                With cleanup, report what would be deleted, delete nothing.");
         sb.AppendLine();
         sb.AppendLine("EXAMPLES:");
-        sb.AppendLine("  fileindexer --drives C,D");
-        sb.AppendLine("  fileindexer --db D:\\index\\fileindex.db --drives C");
-        sb.AppendLine("  fileindexer --drives C --no-hash --recreate");
-        sb.AppendLine("  fileindexer --analyze");
-        sb.AppendLine("  fileindexer --analyze --top 25");
-        sb.AppendLine("  fileindexer --analyze --drives C,D   (combine only C and D's latest scans)");
-        sb.AppendLine("  fileindexer --cleanup --dry-run      (preview what cleanup would delete)");
-        sb.AppendLine("  fileindexer --cleanup                (prune to the latest completed scan per drive)");
+        sb.AppendLine("  dupehunter --drives C,D");
+        sb.AppendLine("  dupehunter --db D:\\index\\dupehunter.db --drives C");
+        sb.AppendLine("  dupehunter --drives C --no-hash --recreate");
+        sb.AppendLine("  dupehunter --analyze");
+        sb.AppendLine("  dupehunter --analyze --top 25");
+        sb.AppendLine("  dupehunter --analyze --drives C,D   (combine only C and D's latest scans)");
+        sb.AppendLine("  dupehunter --cleanup --dry-run      (preview what cleanup would delete)");
+        sb.AppendLine("  dupehunter --cleanup                (prune to the latest completed scan per drive)");
         return sb.ToString();
     }
 }

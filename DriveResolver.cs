@@ -1,4 +1,4 @@
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>Decides which drive roots a scan should walk.</summary>
 public static class DriveResolver

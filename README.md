@@ -1,10 +1,10 @@
-# harddrive-deduper
+# DupeHunter
 
 A Windows C# CLI that scans every file on every (or selected) hard drive and records each
 file's metadata plus a content fingerprint into a local **SQLite database file**. The content hash
 makes it trivial to find duplicate files: any rows sharing a `ContentHash` are byte-for-byte
 identical. SQLite is embedded — there is no server to install or run; the whole database is a single
-`.db` file (default `fileindex.db`).
+`.db` file (default `dupehunter.db`).
 
 ## What it records
 
@@ -86,18 +86,18 @@ No database server is required — SQLite is embedded in the executable.
 dotnet build -c Release
 ```
 
-The executable is `fileindexer` (e.g. `bin/Release/net10.0/fileindexer.exe`).
+The executable is `dupehunter` (e.g. `bin/Release/net10.0/dupehunter.exe`).
 
 ## Usage
 
 ```
-fileindexer [options]
+dupehunter [options]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-d, --drives <list>` | Comma-separated drives to scan (`C,D` or `C:\,E:\`). Omit to scan **all fixed drives**. |
-| `-c, --db, --database <path>` | SQLite database file. Created if it doesn't exist. Default: `fileindex.db`. |
+| `-c, --db, --database <path>` | SQLite database file. Created if it doesn't exist. Default: `dupehunter.db`. |
 | `-t, --table <name>` | Destination table. Default `Files`. |
 | `--no-hash` | Record metadata only; skip hashing (much faster). |
 | `--max-hash-mb <n>` | Skip hashing files larger than `n` MB (metadata still recorded). |
@@ -109,28 +109,28 @@ fileindexer [options]
 
 ### Examples
 
-Scan all fixed drives into the default `fileindex.db`:
+Scan all fixed drives into the default `dupehunter.db`:
 
 ```
-fileindexer
+dupehunter
 ```
 
 Scan only C: and D::
 
 ```
-fileindexer --drives C,D
+dupehunter --drives C,D
 ```
 
 Use a specific database file location:
 
 ```
-fileindexer --db D:\index\fileindex.db --drives C
+dupehunter --db D:\index\dupehunter.db --drives C
 ```
 
 Fast metadata-only inventory of C:, starting fresh:
 
 ```
-fileindexer --drives C --no-hash --recreate
+dupehunter --drives C --no-hash --recreate
 ```
 
 ### Finding duplicates afterward

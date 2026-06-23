@@ -1,7 +1,7 @@
 using System.Data;
 using Microsoft.Data.Sqlite;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// Ensures the destination table exists and streams <see cref="FileRecord"/> rows into it, flushing in

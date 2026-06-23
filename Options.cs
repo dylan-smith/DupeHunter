@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>Parsed command-line options. Help text lives in <c>Options.HelpText.cs</c>.</summary>
 public sealed partial class Options
@@ -9,7 +9,7 @@ public sealed partial class Options
     public List<string> Drives { get; } = new();
 
     /// <summary>Path of the SQLite database file. Created automatically if it doesn't exist.</summary>
-    public string DatabasePath { get; set; } = "fileindex.db";
+    public string DatabasePath { get; set; } = "dupehunter.db";
 
     /// <summary>The SQLite connection string for <see cref="DatabasePath"/>, built on demand.</summary>
     public string ConnectionString =>

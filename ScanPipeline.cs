@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>Aggregated counters across every drive scanned this process, for the final summary.</summary>
 public sealed record ScanTotals(

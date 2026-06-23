@@ -5,8 +5,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>fileindexer</AssemblyName>
-    <RootNamespace>HarddriveDeduper</RootNamespace>
+    <AssemblyName>dupehunter</AssemblyName>
+    <RootNamespace>DupeHunter</RootNamespace>
     <!-- app.manifest opts in to long path (>260 char) support on Windows 10 1607+ -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>

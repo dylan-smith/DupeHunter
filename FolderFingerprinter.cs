@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// Builds a content fingerprint for every folder in a scanned tree from the file hashes already in the

@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "fileindexer (E: drive)": {
+    "dupehunter (E: drive)": {
       "commandName": "Project",
       "commandLineArgs": "--drives C,E"
     }

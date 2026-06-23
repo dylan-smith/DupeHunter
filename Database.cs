@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// Opens connections to the SQLite database file, applying the pragmas every connection needs. The

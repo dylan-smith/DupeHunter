@@ -1,4 +1,4 @@
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// All user-facing console output for a scan: the startup banner, the live (in-place) progress

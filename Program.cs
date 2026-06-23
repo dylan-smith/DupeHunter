@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using HarddriveDeduper;
+using DupeHunter;
 
 // Parse the command line first; bail out early on bad input or a help request.
 Options options;

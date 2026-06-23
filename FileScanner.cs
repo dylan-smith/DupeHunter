@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 
-namespace HarddriveDeduper;
+namespace DupeHunter;
 
 /// <summary>
 /// Walks a directory tree manually (so a single inaccessible folder doesn't abort the whole

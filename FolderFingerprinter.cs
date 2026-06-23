@@ -46,22 +46,35 @@ public sealed class FolderFingerprinter
     /// </summary>
     public void Add(in HashedFile file)
     {
-        byte[]? hashBytes = file.ContentHash is { } hex ? Convert.FromHexString(hex) : null;
+        var hashBytes = file.ContentHash is { } hex ? Convert.FromHexString(hex) : null;
 
-        for (string? dir = Path.GetDirectoryName(file.FullPath); dir is not null; dir = Path.GetDirectoryName(dir))
+        for (var dir = Path.GetDirectoryName(file.FullPath); dir is not null; dir = Path.GetDirectoryName(dir))
         {
-            if (!_folders.TryGetValue(dir, out Accumulator? acc))
+            if (!_folders.TryGetValue(dir, out var acc))
+            {
                 _folders[dir] = acc = new Accumulator();
+            }
 
             acc.FileCount++;
             acc.SizeBytes += file.SizeBytes;
-            if (file.DateModifiedUtc > acc.MaxModifiedUtc) acc.MaxModifiedUtc = file.DateModifiedUtc;
-            if (file.DateCreatedUtc < acc.MinCreatedUtc) acc.MinCreatedUtc = file.DateCreatedUtc;
+            if (file.DateModifiedUtc > acc.MaxModifiedUtc)
+            {
+                acc.MaxModifiedUtc = file.DateModifiedUtc;
+            }
+
+            if (file.DateCreatedUtc < acc.MinCreatedUtc)
+            {
+                acc.MinCreatedUtc = file.DateCreatedUtc;
+            }
 
             if (hashBytes is null)
+            {
                 acc.Tainted = true;
+            }
             else
+            {
                 acc.Hasher.AppendData(hashBytes);
+            }
         }
     }
 
@@ -73,7 +86,7 @@ public sealed class FolderFingerprinter
     /// </summary>
     public IEnumerable<FolderRecord> Finish()
     {
-        foreach ((string path, Accumulator acc) in _folders)
+        foreach ((var path, var acc) in _folders)
         {
             string? fingerprint = null;
             if (!acc.Tainted)
@@ -96,7 +109,7 @@ public sealed class FolderFingerprinter
     /// <summary>The folder's leaf name, falling back to the whole path for a drive root (e.g. <c>C:\</c>).</summary>
     private static string FolderName(string path)
     {
-        string name = Path.GetFileName(path.TrimEnd('\\', '/'));
+        var name = Path.GetFileName(path.TrimEnd('\\', '/'));
         return string.IsNullOrEmpty(name) ? path : name;
     }
 }

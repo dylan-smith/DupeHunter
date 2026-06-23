@@ -47,7 +47,7 @@ public static class DuplicateYamlWriter
         }
 
         sb.AppendLine("scans:");
-        foreach (ScanRef s in scans)
+        foreach (var s in scans)
         {
             sb.AppendLine($"  - drive: {Q(s.Drive)}");
             sb.AppendLine($"    scanRunId: {Q(s.ScanRunId)}");
@@ -64,9 +64,9 @@ public static class DuplicateYamlWriter
         }
 
         sb.AppendLine($"{key}:");
-        foreach (DuplicateGroup g in groups)
+        foreach (var g in groups)
         {
-            bool namesDiffer = g.DistinctNameCount > 1;
+            var namesDiffer = g.DistinctNameCount > 1;
             // MIN(FileName) is only meaningful when every copy shares the one name; otherwise emit null.
             sb.AppendLine($"  - name: {(namesDiffer ? "null" : Q(g.FileName))}");
             sb.AppendLine($"    namesDiffer: {(namesDiffer ? "true" : "false")}");
@@ -76,8 +76,10 @@ public static class DuplicateYamlWriter
             sb.AppendLine($"    wastedBytes: {g.WastedBytes}");
 
             sb.AppendLine("    locations:");
-            foreach (string p in g.SamplePaths)
+            foreach (var p in g.SamplePaths)
+            {
                 sb.AppendLine($"      - {Q(p)}");
+            }
         }
     }
 
@@ -90,7 +92,7 @@ public static class DuplicateYamlWriter
     {
         var sb = new StringBuilder(s.Length + 2);
         sb.Append('"');
-        foreach (char c in s)
+        foreach (var c in s)
         {
             switch (c)
             {
@@ -111,7 +113,7 @@ public static class DuplicateYamlWriter
     {
         string[] units = { "B", "KB", "MB", "GB", "TB", "PB" };
         double size = bytes;
-        int unit = 0;
+        var unit = 0;
         while (size >= 1024 && unit < units.Length - 1)
         {
             size /= 1024;

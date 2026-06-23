@@ -13,6 +13,11 @@ public sealed class ConsoleReporter
     /// <summary>Print what we're about to do: which drives, the hashing mode, and the destination.</summary>
     public void PrintBanner(IReadOnlyList<string> roots)
     {
+        if (roots is null)
+        {
+            throw new ArgumentNullException(nameof(roots));
+        }
+
         Console.WriteLine($"Scanning {roots.Count} drive(s): {string.Join(", ", roots)}");
         Console.WriteLine($"Hashing: {(_options.ComputeHash ? $"SHA-256 ({_options.Parallelism} threads)" : "disabled")}");
         Console.WriteLine($"Database: {Path.GetFullPath(_options.DatabasePath)}  ->  {_options.TableName}");
@@ -27,9 +32,17 @@ public sealed class ConsoleReporter
     /// </summary>
     public MultiProgress StartMultiProgress(IReadOnlyList<string> drives, bool hasHashPass, bool hasFolderPass)
     {
+        if (drives is null)
+        {
+            throw new ArgumentNullException(nameof(drives));
+        }
+
         var slots = new MultiProgress.Slot[drives.Count];
-        for (int i = 0; i < drives.Count; i++)
+        for (var i = 0; i < drives.Count; i++)
+        {
             slots[i] = new MultiProgress.Slot($"[{i + 1}/{drives.Count}] {drives[i]}", hasHashPass, hasFolderPass);
+        }
+
         return new MultiProgress(slots);
     }
 
@@ -39,14 +52,19 @@ public sealed class ConsoleReporter
     /// </summary>
     public static string ProgressBar(long done, long total, int width = 20)
     {
-        double fraction = total <= 0 ? 1.0 : Math.Clamp((double)done / total, 0.0, 1.0);
-        int filled = (int)Math.Round(fraction * width);
+        var fraction = total <= 0 ? 1.0 : Math.Clamp((double)done / total, 0.0, 1.0);
+        var filled = (int)Math.Round(fraction * width);
         return $"[{new string('#', filled)}{new string('-', width - filled)}] {fraction * 100,3:0}%";
     }
 
     /// <summary>Print the final, aggregated tally once every drive has finished (or been canceled).</summary>
     public void PrintSummary(ScanTotals totals, TimeSpan elapsed)
     {
+        if (totals is null)
+        {
+            throw new ArgumentNullException(nameof(totals));
+        }
+
         Console.WriteLine();
         Console.WriteLine();
         Console.WriteLine("Done.");
@@ -54,8 +72,11 @@ public sealed class ConsoleReporter
         Console.WriteLine($"  Rows written:     {totals.RowsWritten:N0}");
         Console.WriteLine($"  Files hashed:     {totals.FilesHashed:N0}");
         if (totals.FoldersWritten > 0)
+        {
             Console.WriteLine($"  Folders fingerprinted: {totals.FoldersWritten:N0}");
-        string skipNote = totals.DirectoriesSkipped > 0 ? $"  (logged to {_options.SkipTableName})" : "";
+        }
+
+        var skipNote = totals.DirectoriesSkipped > 0 ? $"  (logged to {_options.SkipTableName})" : "";
         Console.WriteLine($"  Directories skipped (access): {totals.DirectoriesSkipped:N0}{skipNote}");
         Console.WriteLine($"  Hash errors:      {totals.HashErrors:N0}");
         Console.WriteLine($"  Elapsed:          {elapsed:hh\\:mm\\:ss}");
@@ -64,6 +85,11 @@ public sealed class ConsoleReporter
     /// <summary>Print the ranked duplicate sets produced by <see cref="DuplicateAnalyzer"/>.</summary>
     public void PrintDuplicates(DuplicateAnalysis analysis, int topN)
     {
+        if (analysis is null)
+        {
+            throw new ArgumentNullException(nameof(analysis));
+        }
+
         if (analysis.Scans.Count == 0)
         {
             Console.WriteLine($"No completed scan data found in {_options.TableName}. Run a scan first.");
@@ -72,18 +98,20 @@ public sealed class ConsoleReporter
 
         if (analysis.Scans.Count == 1)
         {
-            ScanRef s = analysis.Scans[0];
+            var s = analysis.Scans[0];
             Console.WriteLine($"Analyzing latest scan for {s.Drive} — scan {s.ScanRunId} (scanned {s.CompletedAtUtc:yyyy-MM-dd HH:mm} UTC).");
         }
         else
         {
             Console.WriteLine($"Analyzing the latest completed scan of {analysis.Scans.Count} drive(s), combined:");
-            foreach (ScanRef s in analysis.Scans)
+            foreach (var s in analysis.Scans)
+            {
                 Console.WriteLine($"  {s.Drive,-10} scan {s.ScanRunId} (scanned {s.CompletedAtUtc:yyyy-MM-dd HH:mm} UTC)");
+            }
         }
         Console.WriteLine();
 
-        IReadOnlyList<DuplicateGroup> groups = analysis.Groups;
+        var groups = analysis.Groups;
         if (groups.Count == 0 && analysis.FolderGroups.Count == 0)
         {
             Console.WriteLine("No duplicates found — no hashed content appears at more than one location.");
@@ -114,18 +142,23 @@ public sealed class ConsoleReporter
     /// <summary>Print one ranked list of duplicate sets (files or folders) with their sample locations.</summary>
     private static void PrintGroups(IReadOnlyList<DuplicateGroup> groups, string variedNameLabel)
     {
-        int rank = 1;
-        foreach (DuplicateGroup g in groups)
+        var rank = 1;
+        foreach (var g in groups)
         {
-            string name = g.DistinctNameCount == 1 ? g.FileName : variedNameLabel;
+            var name = g.DistinctNameCount == 1 ? g.FileName : variedNameLabel;
             Console.WriteLine(
                 $"#{rank,-2} {FormatBytes(g.WastedBytes),11} wasted  |  {name}  |  " +
                 $"{g.CopyCount} copies × {FormatBytes(g.SizeBytes)}  |  hash {g.ContentHash[..12]}…");
 
-            foreach (string path in g.SamplePaths)
+            foreach (var path in g.SamplePaths)
+            {
                 Console.WriteLine($"       {path}");
+            }
+
             if (g.CopyCount > g.SamplePaths.Count)
+            {
                 Console.WriteLine($"       … and {g.CopyCount - g.SamplePaths.Count} more location(s)");
+            }
 
             Console.WriteLine();
             rank++;
@@ -140,7 +173,7 @@ public sealed class ConsoleReporter
     {
         string[] units = { "B", "KB", "MB", "GB", "TB", "PB" };
         double size = bytes;
-        int unit = 0;
+        var unit = 0;
         while (size >= 1024 && unit < units.Length - 1)
         {
             size /= 1024;

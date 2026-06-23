@@ -51,7 +51,7 @@ public sealed class ScanPipeline
 
         try
         {
-            for (int i = 0; i < roots.Count; i++)
+            for (var i = 0; i < roots.Count; i++)
             {
                 scanners[i] = new FileScanner(_options);
                 if (i == 0)
@@ -68,13 +68,13 @@ public sealed class ScanPipeline
             }
 
             int[] codes;
-            bool hasFolderPass = _options.ComputeHash && _options.ComputeFolderFingerprints;
-            await using (MultiProgress display = _reporter.StartMultiProgress(roots, _options.ComputeHash, hasFolderPass))
+            var hasFolderPass = _options.ComputeHash && _options.ComputeFolderFingerprints;
+            await using (var display = _reporter.StartMultiProgress(roots, _options.ComputeHash, hasFolderPass))
             {
                 var tasks = new Task<int>[roots.Count];
-                for (int i = 0; i < roots.Count; i++)
+                for (var i = 0; i < roots.Count; i++)
                 {
-                    int idx = i; // capture per-iteration
+                    var idx = i; // capture per-iteration
                     tasks[idx] = ScanDriveAsync(roots[idx], scanners[idx], writers[idx], display.Slots[idx], linked);
                 }
 
@@ -90,13 +90,15 @@ public sealed class ScanPipeline
                 HashErrors: scanners.Sum(s => s.HashErrors));
 
             // Surface the most severe outcome: a fatal failure outranks a cancellation outranks success.
-            int exitCode = codes.Contains(1) ? 1 : codes.Contains(130) ? 130 : 0;
+            var exitCode = codes.Contains(1) ? 1 : codes.Contains(130) ? 130 : 0;
             return (exitCode, totals);
         }
         finally
         {
-            foreach (DatabaseWriter w in ownedWriters)
+            foreach (var w in ownedWriters)
+            {
                 w.Dispose();
+            }
         }
     }
 
@@ -104,7 +106,7 @@ public sealed class ScanPipeline
     private async Task<int> ScanDriveAsync(
         string root, FileScanner scanner, DatabaseWriter writer, MultiProgress.Slot slot, CancellationTokenSource linked)
     {
-        CancellationToken ct = linked.Token;
+        var ct = linked.Token;
 
         // Log this drive's run as started; it stays "Running" with no completion time until we stamp it below.
         await writer.BeginScanAsync(root, ct);
@@ -116,11 +118,15 @@ public sealed class ScanPipeline
 
             // Pass two: read the rows back and fill in their content hashes.
             if (_options.ComputeHash)
+            {
                 await ComputeHashesAsync(scanner, writer, slot, ct);
+            }
 
             // Pass three: fingerprint every folder from the hashes just written (no files are re-read).
             if (_options.ComputeHash && _options.ComputeFolderFingerprints)
+            {
                 await ComputeFolderFingerprintsAsync(writer, slot, ct);
+            }
 
             await writer.WriteSkipsAsync(DrainSkips(scanner), CancellationToken.None);
             await writer.CompleteScanAsync("Completed", null, CancellationToken.None);
@@ -158,7 +164,7 @@ public sealed class ScanPipeline
             $"files: {scanner.FilesSeen:N0}  written: {writer.RowsWritten:N0}  " +
             $"dirs skipped: {scanner.DirectoriesSkipped:N0}");
 
-        foreach (FileRecord record in scanner.EnumerateFiles(root))
+        foreach (var record in scanner.EnumerateFiles(root))
         {
             ct.ThrowIfCancellationRequested();
             await writer.AddAsync(record, ct);
@@ -183,7 +189,7 @@ public sealed class ScanPipeline
 
         // Pass one wrote exactly the rows pass two will page through, so its count is the bar's total.
         // processed advances by whole chunks; the render timer reads it for the bar as it grows.
-        long total = writer.RowsWrittenThisScan;
+        var total = writer.RowsWrittenThisScan;
         long processed = 0;
 
         slot.StartHash(() =>
@@ -193,9 +199,11 @@ public sealed class ScanPipeline
         long afterId = 0;
         while (true)
         {
-            IReadOnlyList<PendingHash> chunk = await writer.ReadNextHashChunkAsync(afterId, ct);
+            var chunk = await writer.ReadNextHashChunkAsync(afterId, ct);
             if (chunk.Count == 0)
+            {
                 break;
+            }
 
             // Rows come back ordered by Id, so the last one is this chunk's high-water mark.
             afterId = chunk[^1].Id;
@@ -205,9 +213,12 @@ public sealed class ScanPipeline
             var updates = new ConcurrentQueue<HashResult>();
             await Parallel.ForEachAsync(chunk, parallelOpts, (pending, _) =>
             {
-                HashResult result = scanner.HashFile(pending);
+                var result = scanner.HashFile(pending);
                 if (result.ContentHash is not null || result.Error is not null)
+                {
                     updates.Enqueue(result);
+                }
+
                 return ValueTask.CompletedTask;
             });
 
@@ -241,8 +252,11 @@ public sealed class ScanPipeline
     private static SkipRecord[] DrainSkips(FileScanner scanner)
     {
         var skips = new List<SkipRecord>();
-        while (scanner.Skips.TryDequeue(out SkipRecord? skip))
+        while (scanner.Skips.TryDequeue(out var skip))
+        {
             skips.Add(skip);
+        }
+
         return skips.ToArray();
     }
 }

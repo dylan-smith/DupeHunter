@@ -36,7 +36,7 @@ if (options.Analyze)
     try
     {
         var analyzer = new DuplicateAnalyzer(options);
-        DuplicateAnalysis analysis =
+        var analysis =
             await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
         analysisReporter.PrintDuplicates(analysis, options.TopN);
         await WriteYamlReportAsync(analyzer, cts.Token);
@@ -83,7 +83,7 @@ if (!OperatingSystem.IsWindows())
     Console.Error.WriteLine("Warning: this tool targets Windows drive semantics; behavior on other platforms is best-effort.");
 }
 
-List<string> roots = DriveResolver.ResolveRoots(options);
+var roots = DriveResolver.ResolveRoots(options);
 if (roots.Count == 0)
 {
     Console.Error.WriteLine("No drives to scan.");
@@ -114,7 +114,7 @@ catch (Exception ex)
 }
 
 var sw = Stopwatch.StartNew();
-(int exitCode, ScanTotals totals) = await new ScanPipeline(options, reporter, writeLock).RunAsync(roots, writer, cts.Token);
+(var exitCode, var totals) = await new ScanPipeline(options, reporter, writeLock).RunAsync(roots, writer, cts.Token);
 sw.Stop();
 
 reporter.PrintSummary(totals, sw.Elapsed);
@@ -127,7 +127,7 @@ if (exitCode == 0 && options.ComputeHash && !options.NoAnalyze)
     try
     {
         var analyzer = new DuplicateAnalyzer(options);
-        DuplicateAnalysis analysis =
+        var analysis =
             await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
         reporter.PrintDuplicates(analysis, options.TopN);
         await WriteYamlReportAsync(analyzer, cts.Token);
@@ -149,11 +149,14 @@ async Task RunCleanupAsync(CancellationToken ct)
 {
     var cleaner = new DatabaseCleaner(options);
     Console.WriteLine("Determining retained runs (latest completed scan per drive)...");
-    CleanupPlan plan = await cleaner.PlanAsync(ct);
+    var plan = await cleaner.PlanAsync(ct);
 
     Console.WriteLine($"Retaining {plan.KeptScans.Count} run(s):");
-    foreach (ScanRef s in plan.KeptScans)
+    foreach (var s in plan.KeptScans)
+    {
         Console.WriteLine($"  {s.Drive,-6} {s.ScanRunId}  completed {s.CompletedAtUtc:u}");
+    }
+
     Console.WriteLine($"Rows to delete: {plan.FilesToDelete:n0} file/folder row(s), {plan.SkipsToDelete:n0} skip(s).");
     Console.WriteLine("The scan audit log is preserved.");
 
@@ -170,7 +173,7 @@ async Task RunCleanupAsync(CancellationToken ct)
     }
 
     var progress = new Progress<long>(n => Console.Write($"\rDeleting... {n:n0} rows removed"));
-    CleanupResult result = await cleaner.ExecuteAsync(plan, progress, ct);
+    var result = await cleaner.ExecuteAsync(plan, progress, ct);
     Console.WriteLine();
     Console.WriteLine($"Deleted {result.FilesDeleted:n0} file row(s) and {result.SkipsDeleted:n0} skip row(s).");
 }
@@ -181,22 +184,24 @@ async Task RunCleanupAsync(CancellationToken ct)
 async Task WriteYamlReportAsync(DuplicateAnalyzer analyzer, CancellationToken ct)
 {
     if (!options.WriteYaml)
+    {
         return;
+    }
 
     try
     {
         // Stamp the filename and the report's generatedUtc with one timestamp so they agree. The default
         // name carries the timestamp so successive runs each write a fresh file instead of clobbering.
-        DateTime generatedUtc = DateTime.UtcNow;
-        string outputPath = options.YamlOutputPath
+        var generatedUtc = DateTime.UtcNow;
+        var outputPath = options.YamlOutputPath
             ?? $"duplicates-{generatedUtc:yyyyMMdd-HHmmss}.yml";
 
-        DuplicateAnalysis report =
+        var report =
             await analyzer.FindDuplicatesOverThresholdAsync(options.YamlThresholdBytes, ct);
         await DuplicateYamlWriter.WriteAsync(
             outputPath, report, options.YamlThresholdBytes, generatedUtc, ct);
 
-        double thresholdMb = options.YamlThresholdBytes / (1024.0 * 1024.0);
+        var thresholdMb = options.YamlThresholdBytes / (1024.0 * 1024.0);
         Console.WriteLine();
         Console.WriteLine(
             $"Wrote {report.Groups.Count} file set(s) and {report.FolderGroups.Count} folder set(s) " +
@@ -215,7 +220,9 @@ async Task WriteYamlReportAsync(DuplicateAnalyzer analyzer, CancellationToken ct
 async Task MaybeCleanupAfterAnalysisAsync(CancellationToken ct)
 {
     if (options.NoCleanup)
+    {
         return;
+    }
 
     Console.WriteLine();
     try

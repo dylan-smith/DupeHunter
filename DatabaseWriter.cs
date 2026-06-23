@@ -22,14 +22,11 @@ public sealed class DatabaseWriter : IDisposable
     /// <summary>ScanRunId of the drive currently being scanned. Reset by each <see cref="BeginScanAsync"/>.</summary>
     private string _scanRunId = string.Empty;
 
-    /// <summary>Rows written for the current drive's scan run; reset by each <see cref="BeginScanAsync"/>.</summary>
-    private long _rowsWrittenThisScan;
-
     /// <summary>
     /// Rows written for the current drive's scan run so far — also the total number of rows pass two
     /// will page through to hash, so it serves as the denominator for the hash-pass progress bar.
     /// </summary>
-    public long RowsWrittenThisScan => _rowsWrittenThisScan;
+    public long RowsWrittenThisScan { get; private set; }
 
     /// <summary>Total rows written across every drive scanned this process (for the final summary).</summary>
     public long RowsWritten;
@@ -88,7 +85,7 @@ public sealed class DatabaseWriter : IDisposable
     public async Task BeginScanAsync(string drive, CancellationToken ct)
     {
         _scanRunId = Guid.NewGuid().ToString("N");
-        _rowsWrittenThisScan = 0;
+        RowsWrittenThisScan = 0;
 
         await _writeLock.WaitAsync(ct);
         try
@@ -132,7 +129,7 @@ SET CompletedAtUtc = @completed,
 WHERE ScanRunId = @id;";
             cmd.Parameters.AddWithValue("@completed", DateTime.UtcNow);
             cmd.Parameters.AddWithValue("@status", status);
-            cmd.Parameters.AddWithValue("@files", _rowsWrittenThisScan);
+            cmd.Parameters.AddWithValue("@files", RowsWrittenThisScan);
             cmd.Parameters.AddWithValue("@error", (object?)error ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@id", _scanRunId);
             await cmd.ExecuteNonQueryAsync(ct);
@@ -150,7 +147,9 @@ WHERE ScanRunId = @id;";
     public async Task WriteSkipsAsync(IReadOnlyCollection<SkipRecord> skips, CancellationToken ct)
     {
         if (skips.Count == 0)
+        {
             return;
+        }
 
         var table = new DataTable();
         table.Columns.Add("FullPath", typeof(string));
@@ -158,10 +157,10 @@ WHERE ScanRunId = @id;";
         table.Columns.Add("ScanRunId", typeof(string));
         table.Columns.Add("ScannedAtUtc", typeof(DateTime));
 
-        DateTime now = DateTime.UtcNow;
-        foreach (SkipRecord s in skips)
+        var now = DateTime.UtcNow;
+        foreach (var s in skips)
         {
-            DataRow row = table.NewRow();
+            var row = table.NewRow();
             row["FullPath"] = s.FullPath;
             row["Reason"] = s.Reason;
             row["ScanRunId"] = _scanRunId;
@@ -178,7 +177,7 @@ WHERE ScanRunId = @id;";
     /// </summary>
     public async Task AddAsync(FileRecord r, CancellationToken ct)
     {
-        DataRow row = _buffer.NewRow();
+        var row = _buffer.NewRow();
         row["EntryType"] = "F";
         row["FileName"] = Truncate(r.FileName, FileNameMaxLength);
         row["FullPath"] = r.FullPath;
@@ -192,18 +191,22 @@ WHERE ScanRunId = @id;";
         _buffer.Rows.Add(row);
 
         if (_buffer.Rows.Count >= _options.BatchSize)
+        {
             await FlushAsync(ct);
+        }
     }
 
     public async Task FlushAsync(CancellationToken ct)
     {
         if (_buffer.Rows.Count == 0)
+        {
             return;
+        }
 
-        int count = _buffer.Rows.Count;
+        var count = _buffer.Rows.Count;
         await BulkInsertAsync(_buffer, _options.TableName, ct);
         RowsWritten += count;
-        _rowsWrittenThisScan += count;
+        RowsWrittenThisScan += count;
         _buffer.Clear();
     }
 
@@ -233,7 +236,10 @@ LIMIT @take;";
         var chunk = new List<PendingHash>(_options.BatchSize);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
             chunk.Add(new PendingHash(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)));
+        }
+
         return chunk;
     }
 
@@ -245,7 +251,9 @@ LIMIT @take;";
     public async Task UpdateHashesAsync(IReadOnlyCollection<HashResult> results, CancellationToken ct)
     {
         if (results.Count == 0)
+        {
             return;
+        }
 
         await _writeLock.WaitAsync(ct);
         try
@@ -258,12 +266,12 @@ UPDATE {_options.TableName}
 SET ContentHash = @hash,
     ScanError   = IFNULL(ScanError, @error)
 WHERE Id = @id;";
-            SqliteParameter pId = cmd.Parameters.Add("@id", SqliteType.Integer);
-            SqliteParameter pHash = cmd.Parameters.Add("@hash", SqliteType.Text);
-            SqliteParameter pError = cmd.Parameters.Add("@error", SqliteType.Text);
+            var pId = cmd.Parameters.Add("@id", SqliteType.Integer);
+            var pHash = cmd.Parameters.Add("@hash", SqliteType.Text);
+            var pError = cmd.Parameters.Add("@error", SqliteType.Text);
             cmd.Prepare();
 
-            foreach (HashResult r in results)
+            foreach (var r in results)
             {
                 pId.Value = r.Id;
                 pHash.Value = (object?)r.ContentHash ?? DBNull.Value;
@@ -300,7 +308,7 @@ ORDER BY ContentHash;";
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            string? hash = reader.IsDBNull(1) ? null : reader.GetString(1).TrimEnd();
+            var hash = reader.IsDBNull(1) ? null : reader.GetString(1).TrimEnd();
             onFile(new HashedFile(
                 reader.GetString(0), hash, reader.GetInt64(2), reader.GetDateTime(3), reader.GetDateTime(4)));
         }
@@ -313,16 +321,20 @@ ORDER BY ContentHash;";
     public async Task WriteFoldersAsync(IReadOnlyCollection<FolderRecord> folders, CancellationToken ct)
     {
         if (folders.Count == 0)
+        {
             return;
+        }
 
         var table = new DataTable();
         foreach (DataColumn col in _buffer.Columns)
-            table.Columns.Add(col.ColumnName, col.DataType);
-
-        DateTime now = DateTime.UtcNow;
-        foreach (FolderRecord f in folders)
         {
-            DataRow row = table.NewRow();
+            table.Columns.Add(col.ColumnName, col.DataType);
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var f in folders)
+        {
+            var row = table.NewRow();
             row["EntryType"] = "D";
             row["FileName"] = Truncate(f.FileName, FileNameMaxLength);
             row["FullPath"] = f.FullPath;
@@ -350,11 +362,13 @@ ORDER BY ContentHash;";
     private async Task BulkInsertAsync(DataTable table, string destination, CancellationToken ct)
     {
         if (table.Rows.Count == 0)
+        {
             return;
+        }
 
         var columns = table.Columns.Cast<DataColumn>().ToArray();
-        string columnList = string.Join(", ", columns.Select(c => c.ColumnName));
-        string valueList = string.Join(", ", columns.Select(c => "@" + c.ColumnName));
+        var columnList = string.Join(", ", columns.Select(c => c.ColumnName));
+        var valueList = string.Join(", ", columns.Select(c => "@" + c.ColumnName));
 
         await _writeLock.WaitAsync(ct);
         try
@@ -367,9 +381,9 @@ ORDER BY ContentHash;";
             // No fixed SqliteType: each parameter's type is inferred from its Value (long -> INTEGER,
             // DateTime -> ISO TEXT, string -> TEXT, DBNull -> NULL), matching the DataTable columns.
             var parameters = new SqliteParameter[columns.Length];
-            for (int i = 0; i < columns.Length; i++)
+            for (var i = 0; i < columns.Length; i++)
             {
-                SqliteParameter p = cmd.CreateParameter();
+                var p = cmd.CreateParameter();
                 p.ParameterName = "@" + columns[i].ColumnName;
                 cmd.Parameters.Add(p);
                 parameters[i] = p;
@@ -378,8 +392,11 @@ ORDER BY ContentHash;";
 
             foreach (DataRow row in table.Rows)
             {
-                for (int i = 0; i < parameters.Length; i++)
+                for (var i = 0; i < parameters.Length; i++)
+                {
                     parameters[i].Value = row[i];
+                }
+
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 

@@ -21,7 +21,7 @@ public sealed class DuplicateGroup
     public required long WastedBytes { get; init; }
 
     /// <summary>A handful of the locations, for display. May be fewer than <see cref="CopyCount"/>.</summary>
-    public List<string> SamplePaths { get; } = new();
+    public List<string> SamplePaths { get; } = [];
 }
 
 /// <summary>One drive's scan run that fed an analysis: its drive root, scan id and completion time.</summary>
@@ -74,10 +74,10 @@ public sealed class DuplicateAnalyzer
     {
         await using var conn = await Database.OpenConnectionAsync(_options, ct);
 
-        List<ScanRef> scans = await GetLatestCompletedScansAsync(conn, ct);
+        var scans = await GetLatestCompletedScansAsync(conn, ct);
         if (scans.Count == 0)
         {
-            string scope = _options.Drives.Count > 0
+            var scope = _options.Drives.Count > 0
                 ? $" for the selected drive(s): {string.Join(", ", _options.Drives)}"
                 : "";
             throw new InvalidOperationException(
@@ -86,14 +86,19 @@ public sealed class DuplicateAnalyzer
         }
 
         var runIds = scans.Select(s => s.ScanRunId).ToList();
-        long totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
-        List<DuplicateGroup> groups = await QueryFileGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
-        List<DuplicateGroup> folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
+        var totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
+        var groups = await QueryFileGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
+        var folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
 
-        foreach (DuplicateGroup g in groups)
+        foreach (var g in groups)
+        {
             await LoadFileSamplePathsAsync(conn, runIds, g, samplePathsPerGroup, ct);
-        foreach (DuplicateGroup g in folderGroups)
+        }
+
+        foreach (var g in folderGroups)
+        {
             await LoadFolderSamplePathsAsync(conn, runIds, g, samplePathsPerGroup, ct);
+        }
 
         return new DuplicateAnalysis(scans, totalWasted, groups, folderGroups);
     }
@@ -109,20 +114,27 @@ public sealed class DuplicateAnalyzer
     {
         await using var conn = await Database.OpenConnectionAsync(_options, ct);
 
-        List<ScanRef> scans = await GetLatestCompletedScansAsync(conn, ct);
+        var scans = await GetLatestCompletedScansAsync(conn, ct);
         if (scans.Count == 0)
+        {
             return new DuplicateAnalysis(scans, 0, Array.Empty<DuplicateGroup>(), Array.Empty<DuplicateGroup>());
+        }
 
         var runIds = scans.Select(s => s.ScanRunId).ToList();
-        long totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
-        List<DuplicateGroup> groups = await QueryFileGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
-        List<DuplicateGroup> folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
+        var totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
+        var groups = await QueryFileGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
+        var folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
 
         // Load every location (limit 0 = unlimited) so the report lists all copies, not a sample.
-        foreach (DuplicateGroup g in groups)
+        foreach (var g in groups)
+        {
             await LoadFileSamplePathsAsync(conn, runIds, g, limit: 0, ct);
-        foreach (DuplicateGroup g in folderGroups)
+        }
+
+        foreach (var g in folderGroups)
+        {
             await LoadFolderSamplePathsAsync(conn, runIds, g, limit: 0, ct);
+        }
 
         return new DuplicateAnalysis(scans, totalWasted, groups, folderGroups);
     }
@@ -136,16 +148,18 @@ public sealed class DuplicateAnalyzer
     {
         // Guard against the log table not existing (fresh database / analyze-only on an unscanned file).
         if (!await TableExistsAsync(conn, _options.ScanTableName, ct))
-            return new List<ScanRef>();
+        {
+            return [];
+        }
 
         await using var cmd = conn.CreateCommand();
 
         // Optionally restrict to the drives the user named on the command line.
-        string driveFilter = "";
+        var driveFilter = "";
         if (_options.Drives.Count > 0)
         {
             var names = new string[_options.Drives.Count];
-            for (int i = 0; i < _options.Drives.Count; i++)
+            for (var i = 0; i < _options.Drives.Count; i++)
             {
                 names[i] = "@drive" + i;
                 cmd.Parameters.AddWithValue("@drive" + i, _options.Drives[i]);
@@ -169,7 +183,9 @@ ORDER BY Drive;";
         var scans = new List<ScanRef>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
             scans.Add(new ScanRef(reader.GetString(0), reader.GetString(1).TrimEnd(), reader.GetDateTime(2)));
+        }
 
         return scans;
     }
@@ -181,7 +197,7 @@ ORDER BY Drive;";
     private async Task<long> QueryTotalWastedAsync(SqliteConnection conn, IReadOnlyList<string> runIds, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        string inClause = BuildRunIdInClause(cmd, runIds);
+        var inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
 SELECT COALESCE(SUM(WastedBytes), 0)
 FROM (
@@ -192,7 +208,7 @@ FROM (
     HAVING COUNT(*) > 1
 ) AS perGroup;";
 
-        object? result = await cmd.ExecuteScalarAsync(ct);
+        var result = await cmd.ExecuteScalarAsync(ct);
         return result is long total ? total : Convert.ToInt64(result);
     }
 
@@ -205,7 +221,7 @@ FROM (
         SqliteConnection conn, IReadOnlyList<string> runIds, int? topN, long minWastedBytes, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        string inClause = BuildRunIdInClause(cmd, runIds);
+        var inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
 SELECT
     ContentHash,
@@ -237,7 +253,7 @@ ORDER BY WastedBytes DESC{LimitSuffix(cmd, topN)};";
         SqliteConnection conn, IReadOnlyList<string> runIds, int? topN, long minWastedBytes, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        string inClause = BuildRunIdInClause(cmd, runIds);
+        var inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
 {IndependentFoldersCte(inClause)}
 SELECT
@@ -263,7 +279,10 @@ ORDER BY WastedBytes DESC{LimitSuffix(cmd, topN)};";
     private static string LimitSuffix(SqliteCommand cmd, int? topN)
     {
         if (topN is null)
+        {
             return "";
+        }
+
         cmd.Parameters.AddWithValue("@topN", topN.Value);
         return " LIMIT @topN";
     }
@@ -301,7 +320,7 @@ ORDER BY WastedBytes DESC{LimitSuffix(cmd, topN)};";
         SqliteConnection conn, IReadOnlyList<string> runIds, DuplicateGroup g, int limit, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        string inClause = BuildRunIdInClause(cmd, runIds);
+        var inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
 SELECT FullPath
 FROM {_options.TableName}
@@ -321,7 +340,7 @@ ORDER BY FullPath{LimitSuffix(cmd, limit > 0 ? limit : null)};";
         SqliteConnection conn, IReadOnlyList<string> runIds, DuplicateGroup g, int limit, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        string inClause = BuildRunIdInClause(cmd, runIds);
+        var inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
 {IndependentFoldersCte(inClause)}
 SELECT FullPath
@@ -338,7 +357,9 @@ ORDER BY FullPath{LimitSuffix(cmd, limit > 0 ? limit : null)};";
     {
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
             g.SamplePaths.Add(reader.GetString(0));
+        }
     }
 
     /// <summary>
@@ -374,7 +395,7 @@ Independent AS (
     private static string BuildRunIdInClause(SqliteCommand cmd, IReadOnlyList<string> runIds)
     {
         var names = new string[runIds.Count];
-        for (int i = 0; i < runIds.Count; i++)
+        for (var i = 0; i < runIds.Count; i++)
         {
             names[i] = "@run" + i;
             cmd.Parameters.AddWithValue("@run" + i, runIds[i]);

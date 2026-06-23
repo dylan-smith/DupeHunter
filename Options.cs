@@ -6,7 +6,7 @@ namespace DupeHunter;
 public sealed partial class Options
 {
     /// <summary>Drive roots to scan, e.g. "C:\", "D:\". Empty means "all fixed drives".</summary>
-    public List<string> Drives { get; } = new();
+    public List<string> Drives { get; } = [];
 
     /// <summary>Path of the SQLite database file. Created automatically if it doesn't exist.</summary>
     public string DatabasePath { get; set; } = "dupehunter.db";
@@ -37,7 +37,7 @@ public sealed partial class Options
     public bool ComputeFolderFingerprints { get; set; } = true;
 
     /// <summary>Skip hashing files larger than this (bytes). 0 = no limit.</summary>
-    public long MaxHashBytes { get; set; } = 0;
+    public long MaxHashBytes { get; set; }
 
     /// <summary>Rows accumulated before each bulk-copy flush.</summary>
     public int BatchSize { get; set; } = 5_000;
@@ -101,15 +101,10 @@ public sealed partial class Options
     {
         var o = new Options();
 
-        for (int i = 0; i < args.Length; i++)
+        for (var i = 0; i < args.Length; i++)
         {
-            string arg = args[i];
-            string Next(string name)
-            {
-                if (i + 1 >= args.Length)
-                    throw new ArgumentException($"Option '{name}' requires a value.");
-                return args[++i];
-            }
+            var arg = args[i];
+            string Next(string name) => i + 1 >= args.Length ? throw new ArgumentException($"Option '{name}' requires a value.") : args[++i];
 
             switch (arg.ToLowerInvariant())
             {
@@ -123,7 +118,10 @@ public sealed partial class Options
                 case "--drive":
                 case "--drives":
                     foreach (var d in Next(arg).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
                         o.Drives.Add(NormalizeDrive(d));
+                    }
+
                     break;
 
                 case "-c":
@@ -223,11 +221,16 @@ public sealed partial class Options
     /// <summary>Turn "c" / "C:" / "C:\" into the canonical root form "C:\".</summary>
     private static string NormalizeDrive(string raw)
     {
-        string s = raw.Trim().TrimEnd('\\', '/');
+        var s = raw.Trim().TrimEnd('\\', '/');
         if (s.Length == 1 && char.IsLetter(s[0]))
+        {
             s += ":";
+        }
+
         if (s.Length == 2 && char.IsLetter(s[0]) && s[1] == ':')
+        {
             return s.ToUpperInvariant() + "\\";
+        }
         // Fall back to whatever the user gave (could be a UNC path or mount point).
         return raw.EndsWith('\\') ? raw : raw + "\\";
     }

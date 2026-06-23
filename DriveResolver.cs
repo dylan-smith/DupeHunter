@@ -8,10 +8,9 @@ public static class DriveResolver
     /// </summary>
     public static List<string> ResolveRoots(Options options)
     {
-        if (options.Drives.Count > 0)
-            return options.Drives;
-
-        return DriveInfo.GetDrives()
+        return options.Drives.Count > 0
+            ? options.Drives
+            : DriveInfo.GetDrives()
             .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
             .Select(d => d.RootDirectory.FullName)
             .ToList();

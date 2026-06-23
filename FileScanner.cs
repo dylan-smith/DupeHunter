@@ -32,7 +32,7 @@ public sealed class FileScanner(Options options)
 
         while (pending.Count > 0)
         {
-            string dir = pending.Pop();
+            var dir = pending.Pop();
 
             // Queue sub-directories first.
             IEnumerable<string> subDirs;
@@ -46,10 +46,13 @@ public sealed class FileScanner(Options options)
                 continue;
             }
 
-            foreach (string sub in subDirs)
+            foreach (var sub in subDirs)
             {
                 if (!_options.FollowReparsePoints && IsReparsePoint(sub))
+                {
                     continue;
+                }
+
                 pending.Push(sub);
             }
 
@@ -65,9 +68,9 @@ public sealed class FileScanner(Options options)
                 continue;
             }
 
-            foreach (string path in files)
+            foreach (var path in files)
             {
-                FileRecord? record = TryReadMetadata(path);
+                var record = TryReadMetadata(path);
                 if (record is not null)
                 {
                     Interlocked.Increment(ref FilesSeen);
@@ -90,17 +93,16 @@ public sealed class FileScanner(Options options)
         {
             var info = new FileInfo(path);
             // Skip reparse-point files (symlinks) — the target is recorded elsewhere if reachable.
-            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                return null;
-
-            return new FileRecord
-            {
-                FileName = info.Name,
-                FullPath = info.FullName,
-                SizeBytes = info.Length,
-                DateModifiedUtc = info.LastWriteTimeUtc,
-                DateCreatedUtc = info.CreationTimeUtc,
-            };
+            return info.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                ? null
+                : new FileRecord
+                {
+                    FileName = info.Name,
+                    FullPath = info.FullName,
+                    SizeBytes = info.Length,
+                    DateModifiedUtc = info.LastWriteTimeUtc,
+                    DateCreatedUtc = info.CreationTimeUtc,
+                };
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
         {
@@ -116,7 +118,9 @@ public sealed class FileScanner(Options options)
     public HashResult HashFile(PendingHash pending)
     {
         if (_options.MaxHashBytes > 0 && pending.SizeBytes > _options.MaxHashBytes)
+        {
             return new HashResult(pending.Id, ContentHash: null, Error: null);
+        }
 
         try
         {
@@ -129,7 +133,7 @@ public sealed class FileScanner(Options options)
                 FileOptions.SequentialScan);
 
             using var sha = SHA256.Create();
-            byte[] hash = sha.ComputeHash(stream);
+            var hash = sha.ComputeHash(stream);
             Interlocked.Increment(ref FilesHashed);
             return new HashResult(pending.Id, Convert.ToHexStringLower(hash), Error: null);
         }

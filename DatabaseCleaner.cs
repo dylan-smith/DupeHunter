@@ -44,19 +44,23 @@ public sealed class DatabaseCleaner
         await using var conn = await Database.OpenConnectionAsync(_options, ct);
 
         if (!await TableExistsAsync(conn, _options.ScanTableName, ct))
+        {
             throw new InvalidOperationException(
                 $"Scan log '{_options.ScanTableName}' does not exist; cannot determine which runs to keep.");
+        }
 
-        List<ScanRef> kept = await GetLatestCompletedScansAsync(conn, ct);
+        var kept = await GetLatestCompletedScansAsync(conn, ct);
         if (kept.Count == 0)
+        {
             throw new InvalidOperationException(
                 "No completed scan run was found, so there is nothing to retain. Refusing to delete all " +
                 "file data. Run a scan to completion first, or use --recreate on a scan to wipe deliberately.");
+        }
 
-        long files = await TableExistsAsync(conn, _options.TableName, ct)
+        var files = await TableExistsAsync(conn, _options.TableName, ct)
             ? await CountNotKeptAsync(conn, _options.TableName, ct)
             : 0;
-        long skips = await TableExistsAsync(conn, _options.SkipTableName, ct)
+        var skips = await TableExistsAsync(conn, _options.SkipTableName, ct)
             ? await CountNotKeptAsync(conn, _options.SkipTableName, ct)
             : 0;
 
@@ -72,10 +76,10 @@ public sealed class DatabaseCleaner
     {
         await using var conn = await Database.OpenConnectionAsync(_options, ct);
 
-        long files = await TableExistsAsync(conn, _options.TableName, ct)
+        var files = await TableExistsAsync(conn, _options.TableName, ct)
             ? await DeleteNotKeptAsync(conn, _options.TableName, progress, ct)
             : 0;
-        long skips = await TableExistsAsync(conn, _options.SkipTableName, ct)
+        var skips = await TableExistsAsync(conn, _options.SkipTableName, ct)
             ? await DeleteNotKeptAsync(conn, _options.SkipTableName, progress, ct)
             : 0;
 
@@ -105,7 +109,10 @@ ORDER BY Drive;";
         var scans = new List<ScanRef>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
             scans.Add(new ScanRef(reader.GetString(0), reader.GetString(1).TrimEnd(), reader.GetDateTime(2)));
+        }
+
         return scans;
     }
 
@@ -119,7 +126,7 @@ FROM {table} t
 WHERE NOT EXISTS (SELECT 1 FROM Keep k WHERE k.ScanRunId = t.ScanRunId);";
         cmd.CommandTimeout = 0;
 
-        object? result = await cmd.ExecuteScalarAsync(ct);
+        var result = await cmd.ExecuteScalarAsync(ct);
         return result is long total ? total : Convert.ToInt64(result);
     }
 
@@ -128,7 +135,7 @@ WHERE NOT EXISTS (SELECT 1 FROM Keep k WHERE k.ScanRunId = t.ScanRunId);";
     {
         // SQLite has no DELETE...TOP/LIMIT (its build omits that extension), so delete a batch of Ids
         // selected by the same NOT-EXISTS predicate; every target table has an Id primary key.
-        string sql = $@"
+        var sql = $@"
 {KeepCte()}
 DELETE FROM {table}
 WHERE Id IN (
@@ -146,9 +153,11 @@ WHERE Id IN (
             cmd.CommandTimeout = 0;
             cmd.Parameters.AddWithValue("@batch", _options.BatchSize);
 
-            int deleted = await cmd.ExecuteNonQueryAsync(ct);
+            var deleted = await cmd.ExecuteNonQueryAsync(ct);
             if (deleted == 0)
+            {
                 break;
+            }
 
             total += deleted;
             progress?.Report(total);
@@ -177,7 +186,7 @@ WITH Keep AS (
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @t;";
         cmd.Parameters.AddWithValue("@t", table);
-        object? result = await cmd.ExecuteScalarAsync(ct);
+        var result = await cmd.ExecuteScalarAsync(ct);
         return Convert.ToInt64(result) == 1;
     }
 }

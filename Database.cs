@@ -17,6 +17,11 @@ public static class Database
     /// <summary>Create and open a connection to the configured database file with the standard pragmas.</summary>
     public static async Task<SqliteConnection> OpenConnectionAsync(Options options, CancellationToken ct)
     {
+        if (options is null)
+        {
+            throw new ArgumentNullException(nameof(options));
+        }
+
         var connection = new SqliteConnection(options.ConnectionString);
         await connection.OpenAsync(ct);
         await ConfigureAsync(connection, ct);
@@ -31,6 +36,11 @@ public static class Database
     /// </summary>
     public static async Task ConfigureAsync(SqliteConnection connection, CancellationToken ct)
     {
+        if (connection is null)
+        {
+            throw new ArgumentNullException(nameof(connection));
+        }
+
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = $@"
 PRAGMA journal_mode = WAL;

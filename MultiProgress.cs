@@ -55,13 +55,17 @@ public sealed class MultiProgress : IAsyncDisposable
             yield return _header;
             yield return "    pass 1 enumerate: " + (_enumerate is { } e ? e() : Pending);
             if (_hasHashPass)
+            {
                 yield return "    pass 2 hash: " + (_hash is { } h ? h() : Pending);
+            }
+
             if (_hasFolderPass)
+            {
                 yield return "    pass 3 folders: " + (_folders is { } f ? f() : Pending);
+            }
         }
     }
 
-    private readonly IReadOnlyList<Slot> _slots;
     private readonly int _lineCount;
     private readonly bool _live;
     private readonly object _lock = new();
@@ -70,7 +74,7 @@ public sealed class MultiProgress : IAsyncDisposable
 
     internal MultiProgress(IReadOnlyList<Slot> slots)
     {
-        _slots = slots;
+        Slots = slots;
         _lineCount = slots.Sum(s => s.LineCount);
         // In-place repaint needs a real console that honors ANSI cursor moves. If output is redirected,
         // or VT processing can't be enabled (old console host), fall back to a single final render.
@@ -84,7 +88,7 @@ public sealed class MultiProgress : IAsyncDisposable
     }
 
     /// <summary>The per-drive slots, in the same order as the drives passed to the reporter.</summary>
-    public IReadOnlyList<Slot> Slots => _slots;
+    public IReadOnlyList<Slot> Slots { get; }
 
     private void Render()
     {
@@ -95,15 +99,22 @@ public sealed class MultiProgress : IAsyncDisposable
             {
                 // Jump back to the top of the block, then rewrite each line clearing any leftover text.
                 if (_painted)
+                {
                     sb.Append($"[{_lineCount}A");
-                foreach (string line in _slots.SelectMany(s => s.Lines()))
+                }
+
+                foreach (var line in Slots.SelectMany(s => s.Lines()))
+                {
                     sb.Append("\r[K").Append(line).Append('\n');
+                }
             }
             else
             {
                 // Redirected output: no cursor tricks — just emit the block once (on disposal).
-                foreach (string line in _slots.SelectMany(s => s.Lines()))
+                foreach (var line in Slots.SelectMany(s => s.Lines()))
+                {
                     sb.Append(line).Append('\n');
+                }
             }
 
             Console.Write(sb.ToString());
@@ -115,7 +126,10 @@ public sealed class MultiProgress : IAsyncDisposable
     {
         // Awaiting the timer's disposal guarantees no repaint is in flight before the final render.
         if (_timer is not null)
+        {
             await _timer.DisposeAsync();
+        }
+
         Render();
     }
 
@@ -127,19 +141,22 @@ public sealed class MultiProgress : IAsyncDisposable
     private static bool TryEnableVirtualTerminal()
     {
         if (!OperatingSystem.IsWindows())
+        {
             return true;
+        }
 
         const int StdOutputHandle = -11;
         const uint EnableVirtualTerminalProcessing = 0x0004;
 
-        nint handle = GetStdHandle(StdOutputHandle);
+        var handle = GetStdHandle(StdOutputHandle);
         if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
             return false;
-        if (!GetConsoleMode(handle, out uint mode))
-            return false;
-        if ((mode & EnableVirtualTerminalProcessing) != 0)
-            return true;
-        return SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing);
+        }
+
+        return !GetConsoleMode(handle, out var mode)
+            ? false
+            : (mode & EnableVirtualTerminalProcessing) != 0 || SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing);
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

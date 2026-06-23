@@ -37,7 +37,7 @@ jobs:
         run: dotnet build DupeHunter.csproj --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test --no-build
+        run: dotnet test DupeHunter.slnx --no-build
 
       - name: Publish single-file self-contained executable
         run: >

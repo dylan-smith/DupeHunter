@@ -37,9 +37,12 @@ internal sealed record ScanRef(string Drive, string ScanRunId, DateTime Complete
 /// </param>
 /// <param name="FolderGroups">
 /// Duplicate <em>folders</em> — directory trees whose entire content (the set of all descendant file
-/// hashes) is identical — ranked by wasted space. Nested copies are pruned: a folder is never grouped
-/// with its own ancestor or descendant (only the topmost of any such chain is kept), so every set lists
-/// independently deletable trees. These bytes overlap <see cref="Groups"/> and <see cref="TotalWastedBytes"/>
+/// hashes) is identical — ranked by wasted space. Nested copies are pruned so only the highest-level
+/// redundant trees survive: a folder is never grouped with its own ancestor or descendant, and a whole
+/// set is dropped when every copy of it lives inside a copy of a larger duplicate set (deduplicating the
+/// larger tree already reclaims it). So every set lists independently deletable trees and a sub-tree of
+/// an already-listed duplicate folder is never reported on its own. These bytes overlap <see cref="Groups"/>
+/// and <see cref="TotalWastedBytes"/>
 /// (the same redundant files, viewed at folder granularity); they let a whole redundant tree be reclaimed
 /// at once rather than file by file.
 /// </param>
@@ -70,10 +73,11 @@ internal sealed class DuplicateAnalyzer
     /// <paramref name="samplePathsPerGroup"/> example locations to each.
     /// </summary>
     public async Task<DuplicateAnalysis> FindTopDuplicatesAsync(
-        int topN, int samplePathsPerGroup, CancellationToken ct)
+        int topN, int samplePathsPerGroup, CancellationToken ct, IStepProgress? progress = null)
     {
         await using var conn = await Database.OpenConnectionAsync(_options, ct);
 
+        progress?.BeginStep("Selecting the latest completed scan per drive…");
         var scans = await GetLatestCompletedScansAsync(conn, ct);
         if (scans.Count == 0)
         {
@@ -86,19 +90,17 @@ internal sealed class DuplicateAnalyzer
         }
 
         var runIds = scans.Select(s => s.ScanRunId).ToList();
+
+        progress?.BeginStep("Tallying total wasted space…");
         var totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
+
+        progress?.BeginStep("Finding duplicate files…");
         var groups = await QueryFileGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
+
+        progress?.BeginStep("Finding duplicate folders…");
         var folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN, minWastedBytes: 0, ct);
 
-        foreach (var g in groups)
-        {
-            await LoadFileSamplePathsAsync(conn, runIds, g, samplePathsPerGroup, ct);
-        }
-
-        foreach (var g in folderGroups)
-        {
-            await LoadFolderSamplePathsAsync(conn, runIds, g, samplePathsPerGroup, ct);
-        }
+        await LoadAllSamplePathsAsync(conn, runIds, groups, folderGroups, samplePathsPerGroup, progress, ct);
 
         return new DuplicateAnalysis(scans, totalWasted, groups, folderGroups);
     }
@@ -110,10 +112,12 @@ internal sealed class DuplicateAnalyzer
     /// loads <em>all</em> of each set's locations, so the result is a complete, directly-actionable
     /// report rather than a console preview. Returns an empty analysis when no completed scans exist.
     /// </summary>
-    public async Task<DuplicateAnalysis> FindDuplicatesOverThresholdAsync(long minWastedBytes, CancellationToken ct)
+    public async Task<DuplicateAnalysis> FindDuplicatesOverThresholdAsync(
+        long minWastedBytes, CancellationToken ct, IStepProgress? progress = null)
     {
         await using var conn = await Database.OpenConnectionAsync(_options, ct);
 
+        progress?.BeginStep("Selecting the latest completed scan per drive…");
         var scans = await GetLatestCompletedScansAsync(conn, ct);
         if (scans.Count == 0)
         {
@@ -121,22 +125,51 @@ internal sealed class DuplicateAnalyzer
         }
 
         var runIds = scans.Select(s => s.ScanRunId).ToList();
+
+        progress?.BeginStep("Tallying total wasted space…");
         var totalWasted = await QueryTotalWastedAsync(conn, runIds, ct);
+
+        progress?.BeginStep("Finding duplicate files…");
         var groups = await QueryFileGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
+
+        progress?.BeginStep("Finding duplicate folders…");
         var folderGroups = await QueryFolderGroupsAsync(conn, runIds, topN: null, minWastedBytes, ct);
 
         // Load every location (limit 0 = unlimited) so the report lists all copies, not a sample.
-        foreach (var g in groups)
-        {
-            await LoadFileSamplePathsAsync(conn, runIds, g, limit: 0, ct);
-        }
-
-        foreach (var g in folderGroups)
-        {
-            await LoadFolderSamplePathsAsync(conn, runIds, g, limit: 0, ct);
-        }
+        await LoadAllSamplePathsAsync(conn, runIds, groups, folderGroups, limit: 0, progress, ct);
 
         return new DuplicateAnalysis(scans, totalWasted, groups, folderGroups);
+    }
+
+    /// <summary>
+    /// Load the locations for every file and folder set, reporting a running count as it goes (this can
+    /// dominate the analysis when the uncapped report has many sets, each with all of its copies loaded).
+    /// <paramref name="limit"/> ≤ 0 loads them all; otherwise at most that many per set.
+    /// </summary>
+    private async Task LoadAllSamplePathsAsync(
+        SqliteConnection conn, IReadOnlyList<string> runIds,
+        IReadOnlyList<DuplicateGroup> groups, IReadOnlyList<DuplicateGroup> folderGroups,
+        int limit, IStepProgress? progress, CancellationToken ct)
+    {
+        if (groups.Count > 0)
+        {
+            progress?.BeginStep("Collecting file locations…");
+            for (var i = 0; i < groups.Count; i++)
+            {
+                progress?.UpdateStep($"Collecting file locations ({i + 1}/{groups.Count})…");
+                await LoadFileSamplePathsAsync(conn, runIds, groups[i], limit, ct);
+            }
+        }
+
+        if (folderGroups.Count > 0)
+        {
+            progress?.BeginStep("Collecting folder locations…");
+            for (var i = 0; i < folderGroups.Count; i++)
+            {
+                progress?.UpdateStep($"Collecting folder locations ({i + 1}/{folderGroups.Count})…");
+                await LoadFolderSamplePathsAsync(conn, runIds, folderGroups[i], limit, ct);
+            }
+        }
     }
 
     /// <summary>
@@ -241,13 +274,20 @@ ORDER BY WastedBytes DESC{LimitSuffix(cmd, topN)};";
     }
 
     /// <summary>
-    /// Duplicate folders, ranked by wasted space, with nested copies pruned: within each set of
-    /// same-fingerprint folders, any folder that is a descendant of another in the set is dropped (only
-    /// the topmost is kept), then sets with fewer than two remaining copies are discarded. This stops a
-    /// folder being reported as a duplicate of its own ancestor/descendant — e.g. a folder whose only
-    /// child is a subfolder with the same content — which can't be deleted to reclaim space.
-    /// <paramref name="topN"/> caps the result (null = uncapped) and <paramref name="minWastedBytes"/>
-    /// filters out sets reclaiming less than that (0 = no floor).
+    /// Duplicate folders, ranked by wasted space, with nested copies pruned at two levels so that only
+    /// the highest-level redundant trees are reported:
+    /// <list type="bullet">
+    /// <item><description><b>Same-fingerprint nesting</b>: within a set of identical folders, any folder
+    /// that is a descendant of another in the same set is dropped (only the topmost is kept) — e.g. a
+    /// folder whose only child is a subfolder with the same content.</description></item>
+    /// <item><description><b>Cross-set containment</b>: a whole set is dropped when every one of its
+    /// copies lives inside a copy of <em>another</em> duplicate set — i.e. it is a sub-tree of a larger
+    /// duplicate folder. Deduplicating the larger set already reclaims it, so reporting it is redundant
+    /// (e.g. <c>…\Airlift\Videos</c> when <c>…\Airlift</c> is itself a duplicate set).</description></item>
+    /// </list>
+    /// Sets with fewer than two remaining copies are then discarded. <paramref name="topN"/> caps the
+    /// result (null = uncapped) and <paramref name="minWastedBytes"/> filters out sets reclaiming less
+    /// than that (0 = no floor).
     /// </summary>
     private async Task<List<DuplicateGroup>> QueryFolderGroupsAsync(
         SqliteConnection conn, IReadOnlyList<string> runIds, int? topN, long minWastedBytes, CancellationToken ct)
@@ -255,17 +295,18 @@ ORDER BY WastedBytes DESC{LimitSuffix(cmd, topN)};";
         await using var cmd = conn.CreateCommand();
         var inClause = BuildRunIdInClause(cmd, runIds);
         cmd.CommandText = $@"
-{IndependentFoldersCte(inClause)}
+{FolderCtesWithRedundancy(inClause)}
 SELECT
-    ContentHash,
-    SizeBytes,
-    COUNT(*)                    AS CopyCount,
-    (COUNT(*) - 1) * SizeBytes  AS WastedBytes,
-    MIN(FileName)               AS SampleName,
-    COUNT(DISTINCT FileName)    AS DistinctNameCount
-FROM Independent
-GROUP BY ContentHash, SizeBytes
-HAVING COUNT(*) > 1 AND (COUNT(*) - 1) * SizeBytes >= @minWasted
+    i.ContentHash,
+    i.SizeBytes,
+    COUNT(*)                      AS CopyCount,
+    (COUNT(*) - 1) * i.SizeBytes  AS WastedBytes,
+    MIN(i.FileName)               AS SampleName,
+    COUNT(DISTINCT i.FileName)    AS DistinctNameCount
+FROM Independent i
+WHERE NOT EXISTS (SELECT 1 FROM Redundant r WHERE r.SHash = i.ContentHash AND r.SSize = i.SizeBytes)
+GROUP BY i.ContentHash, i.SizeBytes
+HAVING COUNT(*) > 1 AND (COUNT(*) - 1) * i.SizeBytes >= @minWasted
 ORDER BY WastedBytes DESC{LimitSuffix(cmd, topN)};";
         cmd.Parameters.AddWithValue("@minWasted", minWastedBytes);
 
@@ -368,14 +409,21 @@ ORDER BY FullPath{LimitSuffix(cmd, limit > 0 ? limit : null)};";
     /// test: <c>f</c> is under <c>a</c> when <c>a</c>'s path is a prefix of <c>f</c>'s ending at a path
     /// separator (so <c>C:\foo</c> is an ancestor of <c>C:\foo\bar</c> but not of <c>C:\foobar</c>). The
     /// run-id <c>IN</c> clause is shared with the caller's command, which must have added those parameters.
+    /// <para>
+    /// <paramref name="materialize"/> forces SQLite to evaluate <c>Independent</c> once into a transient
+    /// table. Set it only when the CTE is referenced more than once downstream (see
+    /// <see cref="FolderCtesWithRedundancy"/>) — recomputing this self-join per reference is what made the
+    /// folder query take minutes. Leave it off for a single-reference use (e.g. the sample-paths query
+    /// filters by hash), where inlining lets SQLite push the filter into the scan instead.
+    /// </para>
     /// </summary>
-    private string IndependentFoldersCte(string inClause) => $@"
+    private string IndependentFoldersCte(string inClause, bool materialize = false) => $@"
 WITH F AS (
     SELECT FullPath, FileName, ContentHash, SizeBytes
     FROM {_options.TableName}
     WHERE ScanRunId IN ({inClause}) AND ContentHash IS NOT NULL AND EntryType = 'D'
 ),
-Independent AS (
+Independent AS{(materialize ? " MATERIALIZED" : "")} (
     SELECT f.FullPath, f.FileName, f.ContentHash, f.SizeBytes
     FROM F f
     WHERE NOT EXISTS (
@@ -386,6 +434,62 @@ Independent AS (
           AND SUBSTR(f.FullPath, 1, LENGTH(a.FullPath)) = a.FullPath
           AND (SUBSTR(a.FullPath, -1, 1) = '\' OR SUBSTR(f.FullPath, LENGTH(a.FullPath) + 1, 1) = '\')
     )
+)";
+
+    /// <summary>
+    /// The <see cref="IndependentFoldersCte"/> chain extended with a <c>Redundant</c> CTE that lists the
+    /// duplicate folder sets wholly contained inside a <em>different</em> duplicate set — every one of
+    /// their copies sits under a copy of a larger duplicate tree, so the larger set already accounts for
+    /// them. The supporting CTEs are:
+    /// <list type="bullet">
+    /// <item><description><c>Dup</c> — the (hash, size) fingerprints that occur on more than one
+    /// independent folder; i.e. the actual duplicate folder sets.</description></item>
+    /// <item><description><c>DupFolders</c> — the individual independent folders belonging to those
+    /// sets.</description></item>
+    /// <item><description><c>Cover</c> — pairs (S-member, T-set) where the S-member folder is a strict
+    /// descendant of a folder in duplicate set T (same path-prefix test as the nesting prune).</description></item>
+    /// <item><description><c>Redundant</c> — a set S is redundant when some single set T covers
+    /// <em>all</em> of S's copies (covered-member count equals S's copy count).</description></item>
+    /// </list>
+    /// The run-id <c>IN</c> clause is shared with the caller's command, which must have added those parameters.
+    /// <para>
+    /// <c>Independent</c> and <c>DupFolders</c> are <c>MATERIALIZED</c>: both are referenced several times
+    /// below (and <c>DupFolders</c> twice within the <c>Cover</c> self-join), so without this SQLite
+    /// recomputes their expensive path-prefix self-joins per reference — the cause of the folder query
+    /// taking minutes. Materializing each once cut a 20k-folder case from ~276s to ~15s in profiling.
+    /// (Requires SQLite ≥ 3.35, satisfied by the pinned <c>SQLitePCLRaw.bundle_e_sqlite3</c>.)
+    /// </para>
+    /// </summary>
+    private string FolderCtesWithRedundancy(string inClause) => $@"{IndependentFoldersCte(inClause, materialize: true)},
+Dup AS (
+    SELECT ContentHash, SizeBytes, COUNT(*) AS Cnt
+    FROM Independent
+    GROUP BY ContentHash, SizeBytes
+    HAVING COUNT(*) > 1
+),
+DupFolders AS MATERIALIZED (
+    SELECT i.FullPath, i.ContentHash, i.SizeBytes
+    FROM Independent i
+    JOIN Dup d ON d.ContentHash = i.ContentHash AND d.SizeBytes = i.SizeBytes
+),
+Cover AS (
+    SELECT s.ContentHash AS SHash, s.SizeBytes AS SSize, s.FullPath AS SPath,
+           a.ContentHash AS THash, a.SizeBytes AS TSize
+    FROM DupFolders s
+    JOIN DupFolders a
+      ON LENGTH(s.FullPath) > LENGTH(a.FullPath)
+     AND SUBSTR(s.FullPath, 1, LENGTH(a.FullPath)) = a.FullPath
+     AND (SUBSTR(a.FullPath, -1, 1) = '\' OR SUBSTR(s.FullPath, LENGTH(a.FullPath) + 1, 1) = '\')
+),
+Redundant AS (
+    SELECT covered.SHash, covered.SSize
+    FROM (
+        SELECT SHash, SSize, THash, TSize, COUNT(DISTINCT SPath) AS CoveredMembers
+        FROM Cover
+        GROUP BY SHash, SSize, THash, TSize
+    ) covered
+    JOIN Dup d ON d.ContentHash = covered.SHash AND d.SizeBytes = covered.SSize
+    WHERE covered.CoveredMembers = d.Cnt
 )";
 
     /// <summary>

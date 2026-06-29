@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Text;
 
 namespace DupeHunter;
@@ -78,7 +77,7 @@ internal sealed class MultiProgress : IAsyncDisposable
         _lineCount = slots.Sum(s => s.LineCount);
         // In-place repaint needs a real console that honors ANSI cursor moves. If output is redirected,
         // or VT processing can't be enabled (old console host), fall back to a single final render.
-        _live = !Console.IsOutputRedirected && TryEnableVirtualTerminal();
+        _live = !Console.IsOutputRedirected && ConsoleVt.TryEnable();
 
         if (_live)
         {
@@ -131,43 +130,5 @@ internal sealed class MultiProgress : IAsyncDisposable
         }
 
         Render();
-    }
-
-    /// <summary>
-    /// Turn on ANSI escape handling for stdout on Windows so cursor-movement sequences are interpreted
-    /// rather than printed literally. Returns true if VT is on (always so on non-Windows, which honors
-    /// ANSI natively); false if it couldn't be enabled, so the caller can skip in-place repainting.
-    /// </summary>
-    private static bool TryEnableVirtualTerminal()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return true;
-        }
-
-        const int StdOutputHandle = -11;
-        const uint EnableVirtualTerminalProcessing = 0x0004;
-
-        var handle = NativeMethods.GetStdHandle(StdOutputHandle);
-        return handle != IntPtr.Zero
-            && handle != new IntPtr(-1)
-            && NativeMethods.GetConsoleMode(handle, out var mode)
-            && ((mode & EnableVirtualTerminalProcessing) != 0 || NativeMethods.SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing));
-    }
-
-    /// <summary>The kernel32 console P/Invokes used to enable ANSI escape handling on Windows.</summary>
-    private static class NativeMethods
-    {
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-        internal static extern nint GetStdHandle(int nStdHandle);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-        internal static extern bool GetConsoleMode(nint hConsoleHandle, out uint lpMode);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-        internal static extern bool SetConsoleMode(nint hConsoleHandle, uint dwMode);
     }
 }

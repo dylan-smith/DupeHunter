@@ -440,8 +440,10 @@ CREATE TABLE IF NOT EXISTS {_options.TableName} (
     ScanRunId       TEXT    NOT NULL,
     ScannedAtUtc    TEXT    NOT NULL
 );
--- Duplicate analysis groups by (EntryType, ContentHash, SizeBytes), so lead with those columns.
-CREATE INDEX IF NOT EXISTS IX_Files_Dup       ON {_options.TableName} (EntryType, ContentHash, SizeBytes) WHERE ContentHash IS NOT NULL;
+-- Duplicate analysis groups by (EntryType, ContentHash, SizeBytes), so lead with those columns;
+-- ScanRunId trails so analysis (which filters on it) can answer the grouping query from the index
+-- alone — a covering, index-only scan with no per-row table probe for the ScanRunId filter.
+CREATE INDEX IF NOT EXISTS IX_Files_Dup       ON {_options.TableName} (EntryType, ContentHash, SizeBytes, ScanRunId) WHERE ContentHash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS IX_Files_SizeBytes ON {_options.TableName} (SizeBytes);";
 
     private string DropSkipsTableSql() => $"DROP TABLE IF EXISTS {_options.SkipTableName};";

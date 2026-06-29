@@ -36,8 +36,11 @@ if (options.Analyze)
     try
     {
         var analyzer = new DuplicateAnalyzer(options);
-        var analysis =
-            await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
+        DuplicateAnalysis analysis;
+        await using (var status = new StepProgress("Analyzing duplicates…"))
+        {
+            analysis = await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token, status);
+        }
         analysisReporter.PrintDuplicates(analysis, options.TopN);
         await WriteYamlReportAsync(analyzer, cts.Token);
         await MaybeCleanupAfterAnalysisAsync(cts.Token);
@@ -127,8 +130,11 @@ if (exitCode == 0 && options.ComputeHash && !options.NoAnalyze)
     try
     {
         var analyzer = new DuplicateAnalyzer(options);
-        var analysis =
-            await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token);
+        DuplicateAnalysis analysis;
+        await using (var status = new StepProgress("Analyzing duplicates…"))
+        {
+            analysis = await analyzer.FindTopDuplicatesAsync(options.TopN, samplePathsPerGroup: 5, cts.Token, status);
+        }
         reporter.PrintDuplicates(analysis, options.TopN);
         await WriteYamlReportAsync(analyzer, cts.Token);
         await MaybeCleanupAfterAnalysisAsync(cts.Token);
@@ -196,8 +202,11 @@ async Task WriteYamlReportAsync(DuplicateAnalyzer analyzer, CancellationToken ct
         var outputPath = options.YamlOutputPath
             ?? $"duplicates-{generatedUtc:yyyyMMdd-HHmmss}.yml";
 
-        var report =
-            await analyzer.FindDuplicatesOverThresholdAsync(options.YamlThresholdBytes, ct);
+        DuplicateAnalysis report;
+        await using (var status = new StepProgress("Building the full duplicate report…"))
+        {
+            report = await analyzer.FindDuplicatesOverThresholdAsync(options.YamlThresholdBytes, ct, status);
+        }
         await DuplicateYamlWriter.WriteAsync(
             outputPath, report, options.YamlThresholdBytes, generatedUtc, ct);
 

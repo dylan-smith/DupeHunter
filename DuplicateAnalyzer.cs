@@ -405,34 +405,51 @@ ORDER BY FullPath{LimitSuffix(cmd, limit > 0 ? limit : null)};";
 
     /// <summary>
     /// A CTE named <c>Independent</c> over this run's hashed folder rows, excluding any folder that is a
-    /// descendant of another folder sharing its fingerprint and size. "Descendant" is a pure path-prefix
-    /// test: <c>f</c> is under <c>a</c> when <c>a</c>'s path is a prefix of <c>f</c>'s ending at a path
-    /// separator (so <c>C:\foo</c> is an ancestor of <c>C:\foo\bar</c> but not of <c>C:\foobar</c>). The
-    /// run-id <c>IN</c> clause is shared with the caller's command, which must have added those parameters.
+    /// descendant of another folder sharing its fingerprint and size. Nesting is detected by matching a
+    /// folder's <c>parent_path</c> against its parent's <c>FullPath</c> — an indexed equality join rather
+    /// than a path-prefix string scan. This is exact: if <em>any</em> ancestor shares a folder's
+    /// (fingerprint, size) then its immediate parent does too, because folder size is the monotonic sum of
+    /// descendant file sizes and the fingerprint folds in the descendant count, so equal endpoints force
+    /// an identical descendant multiset at every level in between (including the parent).
     /// <para>
-    /// <paramref name="materialize"/> forces SQLite to evaluate <c>Independent</c> once into a transient
-    /// table. Set it only when the CTE is referenced more than once downstream (see
-    /// <see cref="FolderCtesWithRedundancy"/>) — recomputing this self-join per reference is what made the
-    /// folder query take minutes. Leave it off for a single-reference use (e.g. the sample-paths query
-    /// filters by hash), where inlining lets SQLite push the filter into the scan instead.
+    /// <c>F</c> is pre-filtered to <em>raw duplicate</em> folders — fingerprints occurring on 2+ folders
+    /// in the base set. A unique-fingerprint folder can neither survive the final <c>HAVING COUNT(*) &gt; 1</c>
+    /// nor be the ancestor that prunes another (that requires a shared fingerprint), so dropping it loses
+    /// nothing while shrinking the working set drastically before any join.
+    /// </para>
+    /// <para>
+    /// The run-id <c>IN</c> clause is shared with the caller's command, which must have added those
+    /// parameters. <paramref name="materialize"/> forces SQLite to evaluate <c>Independent</c> once into a
+    /// transient table; set it only when the CTE is referenced more than once downstream (see
+    /// <see cref="FolderCtesWithRedundancy"/>). Leave it off for a single-reference use (e.g. the
+    /// sample-paths query filters by hash), where inlining lets SQLite push the filter into the scan.
     /// </para>
     /// </summary>
     private string IndependentFoldersCte(string inClause, bool materialize = false) => $@"
-WITH F AS (
+WITH Base AS (
     SELECT FullPath, FileName, ContentHash, SizeBytes
     FROM {_options.TableName}
     WHERE ScanRunId IN ({inClause}) AND ContentHash IS NOT NULL AND EntryType = 'D'
+),
+RawDup AS (
+    SELECT ContentHash, SizeBytes
+    FROM Base
+    GROUP BY ContentHash, SizeBytes
+    HAVING COUNT(*) > 1
+),
+F AS MATERIALIZED (
+    SELECT b.FullPath, b.FileName, b.ContentHash, b.SizeBytes, parent_path(b.FullPath) AS ParentPath
+    FROM Base b
+    JOIN RawDup r ON r.ContentHash = b.ContentHash AND r.SizeBytes = b.SizeBytes
 ),
 Independent AS{(materialize ? " MATERIALIZED" : "")} (
     SELECT f.FullPath, f.FileName, f.ContentHash, f.SizeBytes
     FROM F f
     WHERE NOT EXISTS (
         SELECT 1 FROM F a
-        WHERE a.ContentHash = f.ContentHash
+        WHERE a.FullPath    = f.ParentPath
+          AND a.ContentHash = f.ContentHash
           AND a.SizeBytes   = f.SizeBytes
-          AND LENGTH(f.FullPath) > LENGTH(a.FullPath)
-          AND SUBSTR(f.FullPath, 1, LENGTH(a.FullPath)) = a.FullPath
-          AND (SUBSTR(a.FullPath, -1, 1) = '\' OR SUBSTR(f.FullPath, LENGTH(a.FullPath) + 1, 1) = '\')
     )
 )";
 
@@ -447,16 +464,19 @@ Independent AS{(materialize ? " MATERIALIZED" : "")} (
     /// <item><description><c>DupFolders</c> — the individual independent folders belonging to those
     /// sets.</description></item>
     /// <item><description><c>Cover</c> — pairs (S-member, T-set) where the S-member folder is a strict
-    /// descendant of a folder in duplicate set T (same path-prefix test as the nesting prune).</description></item>
+    /// descendant of a folder in duplicate set T. Built by climbing each member's parent-path chain
+    /// (<c>Climb</c>) to the root and emitting a pair every time the current ancestor path is itself a
+    /// <c>DupFolders</c> member, so <em>every</em> enclosing duplicate set is collected — O(depth) per
+    /// folder rather than an O(n²) path-prefix self-join.</description></item>
     /// <item><description><c>Redundant</c> — a set S is redundant when some single set T covers
     /// <em>all</em> of S's copies (covered-member count equals S's copy count).</description></item>
     /// </list>
     /// The run-id <c>IN</c> clause is shared with the caller's command, which must have added those parameters.
     /// <para>
     /// <c>Independent</c> and <c>DupFolders</c> are <c>MATERIALIZED</c>: both are referenced several times
-    /// below (and <c>DupFolders</c> twice within the <c>Cover</c> self-join), so without this SQLite
-    /// recomputes their expensive path-prefix self-joins per reference — the cause of the folder query
-    /// taking minutes. Materializing each once cut a 20k-folder case from ~276s to ~15s in profiling.
+    /// below (and <c>DupFolders</c> twice within the <c>Cover</c> derivation, once as the climb seed and
+    /// once as the ancestor lookup), and materializing <c>DupFolders</c> also lets SQLite build an
+    /// automatic index on its <c>FullPath</c> for the per-step <c>Climb</c> join.
     /// (Requires SQLite ≥ 3.35, satisfied by the pinned <c>SQLitePCLRaw.bundle_e_sqlite3</c>.)
     /// </para>
     /// </summary>
@@ -468,18 +488,22 @@ Dup AS (
     HAVING COUNT(*) > 1
 ),
 DupFolders AS MATERIALIZED (
-    SELECT i.FullPath, i.ContentHash, i.SizeBytes
+    SELECT i.FullPath, i.ContentHash, i.SizeBytes, parent_path(i.FullPath) AS ParentPath
     FROM Independent i
     JOIN Dup d ON d.ContentHash = i.ContentHash AND d.SizeBytes = i.SizeBytes
 ),
+Climb AS (
+    SELECT ContentHash AS SHash, SizeBytes AS SSize, FullPath AS SPath, ParentPath AS Cur
+    FROM DupFolders
+    UNION ALL
+    SELECT SHash, SSize, SPath, parent_path(Cur)
+    FROM Climb
+    WHERE Cur IS NOT NULL
+),
 Cover AS (
-    SELECT s.ContentHash AS SHash, s.SizeBytes AS SSize, s.FullPath AS SPath,
-           a.ContentHash AS THash, a.SizeBytes AS TSize
-    FROM DupFolders s
-    JOIN DupFolders a
-      ON LENGTH(s.FullPath) > LENGTH(a.FullPath)
-     AND SUBSTR(s.FullPath, 1, LENGTH(a.FullPath)) = a.FullPath
-     AND (SUBSTR(a.FullPath, -1, 1) = '\' OR SUBSTR(s.FullPath, LENGTH(a.FullPath) + 1, 1) = '\')
+    SELECT c.SHash, c.SSize, c.SPath, a.ContentHash AS THash, a.SizeBytes AS TSize
+    FROM Climb c
+    JOIN DupFolders a ON a.FullPath = c.Cur
 ),
 Redundant AS (
     SELECT covered.SHash, covered.SSize

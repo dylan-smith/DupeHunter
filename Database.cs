@@ -25,6 +25,16 @@ internal static class Database
         var connection = new SqliteConnection(options.ConnectionString);
         await connection.OpenAsync(ct);
         await ConfigureAsync(connection, ct);
+
+        // The folder-duplicate analysis navigates the folder tree by parent path rather than by
+        // expensive path-prefix self-joins. parent_path mirrors how FolderFingerprinter keyed each
+        // folder (Path.GetDirectoryName up to the drive root, returning NULL at a root / UNC share),
+        // so the values match the stored FullPath byte-for-byte. Deterministic so SQLite can hoist it.
+        connection.CreateFunction(
+            "parent_path",
+            (string? p) => p is null ? null : Path.GetDirectoryName(p),
+            isDeterministic: true);
+
         return connection;
     }
 

@@ -128,6 +128,21 @@ public sealed class DuplicateReport
     }
 
     /// <summary>
+    /// Drop every location that no longer exists on disk — copies deleted outside this report (by
+    /// hand, by another tool, by an earlier session whose save was lost). Sets left with fewer than
+    /// two copies are no longer duplicates and drop entirely. Existence checks are injected so the
+    /// model stays free of IO. Returns the number of locations removed.
+    /// </summary>
+    public int PruneMissingLocations(Func<string, bool> fileExists, Func<string, bool> folderExists)
+    {
+        ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(folderExists);
+
+        return RemoveLocationsWhere(FileSets, path => !fileExists(path), countsTowardTotal: true)
+            + RemoveLocationsWhere(FolderSets, path => !folderExists(path), countsTowardTotal: false);
+    }
+
+    /// <summary>
     /// Remove one location from a set, keeping <see cref="TotalWastedBytes"/> in step when asked (the
     /// total counts file sets only — folder sets overlap the same bytes). Removing a copy from a set
     /// that still had redundancy reclaims exactly one file size.
@@ -157,18 +172,30 @@ public sealed class DuplicateReport
     private void RemoveCopiesUnder(string folderPath, Collection<DuplicateReportSet> sets, bool countsTowardTotal)
     {
         var prefix = folderPath.TrimEnd('\\') + '\\';
+        RemoveLocationsWhere(sets, path => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase), countsTowardTotal);
+    }
+
+    /// <summary>
+    /// Strip every location matching <paramref name="shouldRemove"/> from every set, with the same
+    /// <see cref="TotalWastedBytes"/> bookkeeping as <see cref="RemoveCopy"/>, dropping sets left
+    /// below two copies. Returns the number of locations removed.
+    /// </summary>
+    private int RemoveLocationsWhere(Collection<DuplicateReportSet> sets, Func<string, bool> shouldRemove, bool countsTowardTotal)
+    {
+        var removed = 0;
         for (var i = sets.Count - 1; i >= 0; i--)
         {
             var set = sets[i];
             for (var j = set.Locations.Count - 1; j >= 0; j--)
             {
-                if (set.Locations[j].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                if (shouldRemove(set.Locations[j]))
                 {
                     if (countsTowardTotal && set.Locations.Count >= 2)
                     {
                         TotalWastedBytes = Math.Max(0, TotalWastedBytes - set.SizeBytes);
                     }
                     set.Locations.RemoveAt(j);
+                    removed++;
                 }
             }
 
@@ -177,6 +204,7 @@ public sealed class DuplicateReport
                 sets.RemoveAt(i);
             }
         }
+        return removed;
     }
 
     /// <summary>Case-insensitive location lookup (Windows path semantics).</summary>

@@ -5,20 +5,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>dupehunter</AssemblyName>
-    <RootNamespace>DupeHunter</RootNamespace>
+    <AssemblyName>dupehunter-backup</AssemblyName>
+    <RootNamespace>DupeHunter.Backup</RootNamespace>
     <!-- app.manifest opts in to long path (>260 char) support on Windows 10 1607+ -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="DupeHunter.Core\DupeHunter.Core.csproj" />
+    <ProjectReference Include="..\DupeHunter.Core\DupeHunter.Core.csproj" />
   </ItemGroup>
 
-  <!-- This project globs *.cs from the repo root; keep the sibling projects out of it. -->
+  <!-- Reuse the scanner CLI's internal console helpers (step spinner + VT enablement) without duplicating them. -->
   <ItemGroup>
-    <Compile Remove="DupeHunter.Core\**;DupeHunter.Gui\**;DupeHunter.Backup\**" />
-    <None Remove="DupeHunter.Core\**;DupeHunter.Gui\**;DupeHunter.Backup\**" />
+    <Compile Include="..\StepProgress.cs" Link="Shared\StepProgress.cs" />
+    <Compile Include="..\ConsoleVt.cs" Link="Shared\ConsoleVt.cs" />
   </ItemGroup>
 
 </Project>

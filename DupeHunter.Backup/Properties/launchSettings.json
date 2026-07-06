@@ -1,0 +1,43 @@
+{
+  // Debug profiles for dupehunter-backup. Full reference of arguments (see also --help):
+  //
+  //   <backup-folder>              Positional: the backup folder to check (or -b/--backup <path>).
+  //                                Required for a real run.
+  //   -c, --db, --database <path>  SQLite database written by dupehunter scans.
+  //                                Default: dupehunter.db in the working directory.
+  //   -d, --drives <list>          Comma-separated drives providing the external side (e.g. C,D).
+  //                                Must include the backup folder's own drive. Omit = all scanned drives.
+  //       --exclude <path>         Folder whose contents never count as external copies
+  //                                (e.g. another backup folder). Repeatable.
+  //   -t, --table <name>           File inventory table. Default: Files
+  //       --scan-table <name>      Scan-run audit table. Default: Scans
+  //       --top <n>                Deletable entries listed on the console. Default: 20
+  //       --max-locations <n>      External locations reported per entry. Default: 3
+  //       --max-copies-per-key <n> Memory cap: external paths remembered per distinct file content.
+  //                                Default: 1000
+  //       --yaml-out <path>        Report file. Default: backup-report-<UTC timestamp>.yml
+  //       --include-unmatched      Also list every unmatched (keep) file in the YAML, not just a count.
+  //       --no-yaml                Skip writing the YAML report.
+  //   -h, --help                   Show help.
+  "profiles": {
+    "dupehunter-backup": {
+      "commandName": "Project",
+      // Point at a real backup folder and the database produced by dupehunter scans.
+      "commandLineArgs": "\"D:\\Backups\\Documents - Sep 2019\" --db E:\\git\\harddrive-deduper\\bin\\Debug\\net10.0\\dupehunter.db"
+    },
+    "dupehunter-backup (no YAML, top 50)": {
+      "commandName": "Project",
+      // Console-only triage: deeper top list, no report file written.
+      "commandLineArgs": "D:\\Downloads\\Downloads --db E:\\git\\harddrive-deduper\\bin\\Debug\\net10.0\\dupehunter.db --no-yaml --top 50"
+    },
+    "dupehunter-backup (with excludes)": {
+      "commandName": "Project",
+      // Keep another backup location from vouching for this one; list kept files in the YAML too.
+      "commandLineArgs": "D:\\Downloads\\Downloads --db E:\\git\\harddrive-deduper\\bin\\Debug\\net10.0\\dupehunter.db --exclude E:\\OtherBackup --include-unmatched"
+    },
+    "dupehunter-backup (help)": {
+      "commandName": "Project",
+      "commandLineArgs": "--help"
+    }
+  }
+}

@@ -122,6 +122,10 @@ public sealed partial class MainViewModel : ObservableObject
                 : "Scans: " + string.Join("   ", session.Report.Scans.Select(s => $"{s.Drive} {s.CompletedAtUtc.ToLocalTime():g}"));
             TotalWastedText = $"Total reclaimable: {Format.Bytes(session.Report.TotalWastedBytes)}";
             StatusText = $"{FileGroups.Count} duplicate file sets, {FolderGroups.Count} duplicate folder sets over {MinWastedMb:0.#} MB wasted.";
+            if (session.PrunedOnLoad > 0)
+            {
+                StatusText += $" Pruned {session.PrunedOnLoad} location(s) no longer on disk.";
+            }
 
             _settings.Save(new AppSettings { LastReportPath = ReportPath, MinWastedMb = MinWastedMb });
         }

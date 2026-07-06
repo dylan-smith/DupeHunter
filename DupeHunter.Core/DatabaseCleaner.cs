@@ -88,34 +88,12 @@ public sealed class DatabaseCleaner
     }
 
     /// <summary>
-    /// The runs to retain: the most recent completed scan of each drive. Mirrors
-    /// <see cref="DuplicateAnalyzer.GetLatestCompletedScansAsync"/> but spans every drive (cleanup is
-    /// database-wide), so the keep set here matches the <c>Keep</c> CTE used by the delete statements.
+    /// The runs to retain: the most recent completed scan of each drive. Same selection as
+    /// <see cref="ScanSelector"/> but spanning every drive (cleanup is database-wide, so it deliberately
+    /// ignores <c>--drives</c>), matching the <c>Keep</c> CTE used by the delete statements.
     /// </summary>
-    private async Task<List<ScanRef>> GetLatestCompletedScansAsync(SqliteConnection conn, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $@"
-SELECT Drive, ScanRunId, CompletedAtUtc
-FROM (
-    SELECT Drive, ScanRunId, CompletedAtUtc,
-           ROW_NUMBER() OVER (PARTITION BY Drive ORDER BY CompletedAtUtc DESC, ScanRunId) AS rn
-    FROM {_options.ScanTableName}
-    WHERE Status = 'Completed' AND Drive IS NOT NULL
-) ranked
-WHERE rn = 1
-ORDER BY Drive;";
-        cmd.CommandTimeout = 0;
-
-        var scans = new List<ScanRef>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            scans.Add(new ScanRef(reader.GetString(0), reader.GetString(1).TrimEnd(), reader.GetDateTime(2)));
-        }
-
-        return scans;
-    }
+    private Task<List<ScanRef>> GetLatestCompletedScansAsync(SqliteConnection conn, CancellationToken ct) =>
+        ScanSelector.GetLatestCompletedScansAsync(conn, _options.ScanTableName, [], ct);
 
     private async Task<long> CountNotKeptAsync(SqliteConnection conn, string table, CancellationToken ct)
     {

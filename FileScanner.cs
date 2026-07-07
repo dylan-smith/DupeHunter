@@ -21,6 +21,9 @@ internal sealed class FileScanner(Options options)
     public long DirectoriesSkipped;
     public long HashErrors;
 
+    /// <summary>Total size of the files that failed to hash — dropped from the pass-two progress totals.</summary>
+    public long BytesHashErrored;
+
     /// <summary>Directories that couldn't be enumerated, with the reason. Populated as the scan runs.</summary>
     public readonly ConcurrentQueue<SkipRecord> Skips = new();
 
@@ -144,6 +147,7 @@ internal sealed class FileScanner(Options options)
         catch (Exception ex)
         {
             Interlocked.Increment(ref HashErrors);
+            Interlocked.Add(ref BytesHashErrored, pending.SizeBytes);
             return new HashResult(pending.Id, ContentHash: null, ex.GetType().Name + ": " + ex.Message);
         }
     }

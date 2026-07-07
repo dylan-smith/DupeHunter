@@ -203,14 +203,21 @@ internal sealed class ScanPipeline
 
         slot.StartHash(() =>
         {
+            // Files that can't be hashed (I/O errors) never contribute to BytesHashed, so leaving them
+            // in the totals would strand the bar short of 100%. Drop the errored files from both the
+            // numerator and the totals so the bar targets only the files that can actually be hashed.
+            var errored = scanner.HashErrors;
+            var hashableFiles = total - errored;
+            var hashableBytes = totalBytes - scanner.BytesHashErrored;
+
             // The bar blends how far we are through the files with how far through the bytes, so a chunk
             // of huge files moves it as much as their size warrants rather than by file count alone.
-            var fileFraction = total <= 0 ? 1.0 : (double)processed / total;
-            var byteFraction = totalBytes <= 0 ? 1.0 : (double)scanner.BytesHashed / totalBytes;
+            var fileFraction = hashableFiles <= 0 ? 1.0 : (double)(processed - errored) / hashableFiles;
+            var byteFraction = hashableBytes <= 0 ? 1.0 : (double)scanner.BytesHashed / hashableBytes;
             return $"{ConsoleReporter.ProgressBar((fileFraction + byteFraction) / 2)}  " +
-                $"hashed: {scanner.FilesHashed:N0} / {total:N0}  " +
-                $"{ConsoleReporter.FormatBytesPair(scanner.BytesHashed, totalBytes)}  " +
-                $"hash errors: {scanner.HashErrors:N0}";
+                $"hashed: {scanner.FilesHashed:N0} / {hashableFiles:N0}  " +
+                $"{ConsoleReporter.FormatBytesPair(scanner.BytesHashed, hashableBytes)}  " +
+                $"hash errors: {errored:N0}";
         });
 
         long afterId = 0;

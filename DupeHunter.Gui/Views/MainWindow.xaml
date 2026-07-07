@@ -84,7 +84,7 @@
                               VirtualizingPanel.ScrollUnit="Item">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="*" />
-                            <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" Width="90" />
+                            <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" SortMemberPath="SizeBytes" Width="90" />
                             <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="220" />
                         </DataGrid.Columns>
                     </DataGrid>
@@ -98,7 +98,7 @@
                               VirtualizingPanel.ScrollUnit="Item">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="*" />
-                            <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" Width="90" />
+                            <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" SortMemberPath="SizeBytes" Width="90" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </TabItem>

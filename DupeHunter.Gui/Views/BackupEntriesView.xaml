@@ -35,8 +35,8 @@
             </DataGrid.RowStyle>
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
-                <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" Width="90" />
-                <DataGridTextColumn Header="Files" Binding="{Binding FileCountText}" Width="70" />
+                <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" SortMemberPath="SizeBytes" Width="90" />
+                <DataGridTextColumn Header="Files" Binding="{Binding FileCountText}" SortMemberPath="FileCount" Width="70" />
                 <DataGridTextColumn Header="Match" Binding="{Binding MatchKindText}" Width="70" />
                 <DataGridTextColumn Header="Status" Binding="{Binding StatusText}" Width="200" />
             </DataGrid.Columns>

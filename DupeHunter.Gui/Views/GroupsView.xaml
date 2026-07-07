@@ -28,9 +28,9 @@
                   SelectionChanged="GroupsGrid_SelectionChanged">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Name" Binding="{Binding DisplayName}" Width="*" />
-                <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" Width="90" />
+                <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource Bytes}}" SortMemberPath="SizeBytes" Width="90" />
                 <DataGridTextColumn Header="Copies" Binding="{Binding RemainingCopies}" Width="70" />
-                <DataGridTextColumn Header="Wasted" Binding="{Binding WastedBytes, Converter={StaticResource Bytes}}" Width="90" />
+                <DataGridTextColumn Header="Wasted" Binding="{Binding WastedBytes, Converter={StaticResource Bytes}}" SortMemberPath="WastedBytes" Width="90" />
             </DataGrid.Columns>
         </DataGrid>
 

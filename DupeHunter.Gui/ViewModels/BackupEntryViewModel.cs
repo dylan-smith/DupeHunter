@@ -60,6 +60,9 @@ public sealed partial class BackupEntryViewModel : ObservableObject
     /// <summary>Descendant file count, formatted — folders only (blank for files).</summary>
     public string FileCountText => IsFolder ? _entry.FileCount.ToString("n0") : "";
 
+    /// <summary>Raw descendant file count — the numeric key the Files column sorts by.</summary>
+    public long FileCount => _entry.FileCount;
+
     /// <summary>How the entry was matched to external content: exact, superset, or file.</summary>
     public string MatchKindText => _entry.MatchKind switch
     {

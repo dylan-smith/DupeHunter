@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 
-namespace DupeHunter.Backup;
+namespace DupeHunter;
 
 /// <summary>How a deletable backup entry was matched to external content.</summary>
 public enum BackupMatchKind
@@ -46,6 +46,9 @@ public sealed class UnverifiableEntry
 /// The result of checking one backup folder against the scan database: which entries can be deleted
 /// because their content exists outside the backup tree, and which must be kept. Deletable folders are
 /// never descended into, so the deletable folder/file lists never overlap and their bytes sum cleanly.
+/// Like <see cref="DuplicateReport"/>, this doubles as the GUI's working model: a reviewing tool
+/// removes entries as they are deleted from the backup (or kept on purpose) and persists the result
+/// back through <see cref="BackupYamlWriter"/>.
 /// </summary>
 public sealed class BackupReport
 {
@@ -75,9 +78,61 @@ public sealed class BackupReport
     public long TotalDeletableBytes =>
         DeletableFolders.Sum(e => e.SizeBytes) + DeletableFiles.Sum(e => e.SizeBytes);
 
-    /// <summary>Bytes that must stay in the backup (content not found elsewhere).</summary>
-    public long UnmatchedBytes => UnmatchedFiles.Sum(e => e.SizeBytes);
+    /// <summary>
+    /// How many files must stay in the backup (content not found elsewhere). Stored rather than derived
+    /// from <see cref="UnmatchedFiles"/>: the YAML only lists the unmatched files on request
+    /// (--include-unmatched), and the count has to survive a round trip without the list.
+    /// </summary>
+    public int UnmatchedFileCount { get; set; }
+
+    /// <summary>Bytes that must stay in the backup; stored for the same reason as <see cref="UnmatchedFileCount"/>.</summary>
+    public long UnmatchedBytes { get; set; }
 
     /// <summary>Bytes that cannot be vouched for (never hashed).</summary>
     public long UnverifiableBytes => UnverifiableFiles.Sum(e => e.SizeBytes);
+
+    /// <summary>
+    /// Record that a deletable folder is resolved — deleted from the backup, or deliberately kept —
+    /// either way it needs no further review. Returns false when the entry was already gone. Idempotent.
+    /// </summary>
+    public bool RemoveDeletableFolder(BackupReportEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        return DeletableFolders.Remove(entry);
+    }
+
+    /// <inheritdoc cref="RemoveDeletableFolder"/>
+    public bool RemoveDeletableFile(BackupReportEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        return DeletableFiles.Remove(entry);
+    }
+
+    /// <summary>
+    /// Drop every deletable entry that no longer exists on disk — deleted outside this report (by
+    /// hand, by another tool, by an earlier session whose save was lost). Existence checks are
+    /// injected so the model stays free of IO. Returns the number of entries removed.
+    /// </summary>
+    public int PruneMissingEntries(Func<string, bool> fileExists, Func<string, bool> folderExists)
+    {
+        ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(folderExists);
+
+        return RemoveEntriesWhere(DeletableFolders, path => !folderExists(path))
+            + RemoveEntriesWhere(DeletableFiles, path => !fileExists(path));
+    }
+
+    private static int RemoveEntriesWhere(Collection<BackupReportEntry> entries, Func<string, bool> shouldRemove)
+    {
+        var removed = 0;
+        for (var i = entries.Count - 1; i >= 0; i--)
+        {
+            if (shouldRemove(entries[i].Path))
+            {
+                entries.RemoveAt(i);
+                removed++;
+            }
+        }
+        return removed;
+    }
 }

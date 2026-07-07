@@ -23,7 +23,7 @@
     "dupehunter-backup": {
       "commandName": "Project",
       // Point at a real backup folder and the database produced by dupehunter scans.
-      "commandLineArgs": "\"D:\\Backups\\Documents - Sep 2019\" --db E:\\git\\harddrive-deduper\\bin\\Debug\\net10.0\\dupehunter.db"
+      "commandLineArgs": "\"D:\\Backups\" --db E:\\git\\harddrive-deduper\\bin\\Debug\\net10.0\\dupehunter.db"
     },
     "dupehunter-backup (no YAML, top 50)": {
       "commandName": "Project",

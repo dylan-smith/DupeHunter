@@ -60,6 +60,11 @@ public sealed class BackupAnalyzer
         }
 
         new BackupMatcher(index, _options.MaxLocations, report).Run(tree);
+
+        // Stamp the unmatched totals: the YAML carries them even when the unmatched list itself
+        // isn't serialized, so they must live on the report rather than derive from the list.
+        report.UnmatchedFileCount = report.UnmatchedFiles.Count;
+        report.UnmatchedBytes = report.UnmatchedFiles.Sum(e => e.SizeBytes);
         return report;
     }
 

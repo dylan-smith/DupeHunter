@@ -51,6 +51,12 @@ that's down to one copy drops out; deleting a folder tree also strips everything
 beneath it), so you can close the GUI and pick up where you left off later. The scan database is never
 touched by the GUI — it's only re-read the next time the CLI scans or analyzes.
 
+The GUI also opens the `backup-report-<timestamp>.yml` reports written by **`dupehunter-backup`** (it
+detects which kind of report a `.yml` is). Backup reports list backup files/folders whose content
+already exists outside the backup tree: each entry can be **deleted** from the backup or **kept**
+(dismissed from the report without touching the disk), and either choice rewrites the report in place
+the same way.
+
 The report looks like:
 
 ```yaml

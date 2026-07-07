@@ -1,13 +1,14 @@
 using System.Globalization;
 using System.Text;
 
-namespace DupeHunter.Backup;
+namespace DupeHunter;
 
 /// <summary>
 /// Writes a <see cref="BackupReport"/> to a YAML file: every backup entry that can be deleted because
 /// its content exists outside the backup tree, with the external locations that justify it. The YAML
 /// is emitted by hand — there is no YAML dependency — so every string is double-quoted and escaped,
-/// which lets Windows paths (backslashes) and awkward file names survive.
+/// which lets Windows paths (backslashes) and awkward file names survive. Round-trips through
+/// <see cref="BackupYamlReader"/>.
 /// </summary>
 public static class BackupYamlWriter
 {
@@ -38,7 +39,7 @@ public static class BackupYamlWriter
         WriteEntries(sb, "deletableFolders", report.DeletableFolders, withFolderFields: true);
         WriteEntries(sb, "deletableFiles", report.DeletableFiles, withFolderFields: false);
 
-        sb.AppendLine($"unmatchedFileCount: {report.UnmatchedFiles.Count}");
+        sb.AppendLine($"unmatchedFileCount: {report.UnmatchedFileCount}");
         sb.AppendLine($"unmatchedBytes: {report.UnmatchedBytes}");
         sb.AppendLine($"unverifiableFileCount: {report.UnverifiableFiles.Count}");
         sb.AppendLine($"unverifiableBytes: {report.UnverifiableBytes}");
